@@ -27,30 +27,24 @@ namespace Azure.Communication.Media.Tests
             if (eventData.Message == null)
                 return;
 
-            var originalColor = Console.ForegroundColor;
             try
             {
-                Console.ForegroundColor = GetColorForEventLevel(eventData.Level);
-
                 if (eventData.Keywords.HasFlag(SdkEventSourceKeywords.Telemetry))
                 {
-                    Console.Write('.');
-                    // Console.WriteLine($"Telemetry: {string.Format(eventData.Message, eventData!.Payload!.ToArray())}");
+                    // Skip telemetry dots in production log streams
                 }
                 else if (eventData.Level <= EventLevel.Warning)
                 {
-                    // Handle the case where Payload might be null or empty
-                    Console.WriteLine(eventData.Payload != null && eventData.Payload.Count > 0
+                    var prefix = eventData.Level <= EventLevel.Error ? "ERROR" : "WARN";
+                    var msg = eventData.Payload != null && eventData.Payload.Count > 0
                         ? string.Format(eventData.Message, eventData.Payload.ToArray())
-                        : eventData.Message);
+                        : eventData.Message;
+                    Console.WriteLine($"[MediaSDK:{prefix}] {msg}");
                 }
-
-                //    Console.WriteLine("Stack trace:");
-                //    Console.WriteLine(Environment.StackTrace);
             }
-            finally
+            catch
             {
-                Console.ForegroundColor = originalColor;
+                // Don't let event listener crash the app
             }
         }
 

@@ -6,159 +6,324 @@ using Azure.Identity;
 using Azure.Messaging;
 using Azure.Messaging.EventGrid;
 using Azure.Messaging.EventGrid.SystemEvents;
+using CallAutomation_AzOpenAI_Voice.Models;
+using CallAutomation_AzOpenAI_Voice.Services;
 using CallAutomationOpenAI;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Log unhandled exceptions to stdout for App Service diagnostics
+AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
+{
+    Console.Error.WriteLine($"UNHANDLED EXCEPTION: {e.ExceptionObject}");
+};
+
+// Add Razor Pages
+builder.Services.AddRazorPages();
+
+// Register MediaClient as singleton (lazy — created on first use to avoid startup crash if config is missing)
+MediaClient? mediaClient = null;
+builder.Services.AddSingleton<MediaClient>(sp =>
+{
+    if (mediaClient != null) return mediaClient;
+    var config = sp.GetRequiredService<IConfiguration>();
+    var connStr = config.GetValue<string>("MediaSDKConnectionString");
+    if (string.IsNullOrEmpty(connStr) || connStr.StartsWith("<"))
+        throw new InvalidOperationException("MediaSDKConnectionString is not configured. Set it in App Service Application Settings.");
+    var options = new MediaClientOptions("dev", false, TimeSpan.FromSeconds(10));
+    mediaClient = new MediaClient(connStr, options);
+    return mediaClient;
+});
+
+// Register CallAutomationClient as singleton (lazy)
+CallAutomationClient? callAutomationClient = null;
+builder.Services.AddSingleton<CallAutomationClient>(sp =>
+{
+    if (callAutomationClient != null) return callAutomationClient;
+    var config = sp.GetRequiredService<IConfiguration>();
+    var connStr = config.GetValue<string>("AcsConnectionString");
+    if (string.IsNullOrEmpty(connStr) || connStr.StartsWith("<"))
+        throw new InvalidOperationException("AcsConnectionString is not configured. Set it in App Service Application Settings.");
+    callAutomationClient = new CallAutomationClient(connStr);
+    return callAutomationClient;
+});
+
+// Register CallSessionManager as singleton
+builder.Services.AddSingleton<CallSessionManager>();
+
+// Register IConfiguration explicitly (already available, but make it clear)
+builder.Services.AddSingleton<IConfiguration>(builder.Configuration);
+
 var app = builder.Build();
 
-MediaClientOptions mediaClientOptions = new MediaClientOptions("dev", false, TimeSpan.FromSeconds(10));
-TestCallRoomConnector? testCallConnector = null;
-AcsMediaStreamingHandler? acsHandlerInstance = null;
-var loggerFactory = app.Services.GetService(typeof(ILoggerFactory)) as ILoggerFactory;
-var startupLogger = loggerFactory?.CreateLogger<Program>() ?? throw new Exception("LoggerFactory not found");
-
-// Enable EventSource error reporting
+// Enable EventSource error reporting (non-fatal if native SDK not available)
 System.Diagnostics.Tracing.EventSource.SetCurrentThreadActivityId(Guid.NewGuid());
-
-    var listener = new MediaSdkEventListener();
-    var _mediaClient = new MediaClient(builder.Configuration.GetValue<string>("MediaSDKConnectionString"), mediaClientOptions);
-
-    string serviceOrigin = _mediaClient.ServiceOrigin;
-    Console.WriteLine($"Service Origin URL: {serviceOrigin}");
-    Console.WriteLine($"GetCurrentDirectory: {Directory.GetCurrentDirectory()}");
-    Console.WriteLine($"BaseDirectory: {AppContext.BaseDirectory}");
-
-    testCallConnector = new TestCallRoomConnector(_mediaClient, startupLogger, app.Services);
-
-    var client = new CallAutomationClient(new Uri(builder.Configuration.GetValue<string>("AcsConnectionString")), new DefaultAzureCredential());
-
-
-    var appBaseUrl = builder.Configuration.GetValue<string>("DevTunnelUri");
-
-app.MapGet("/", () => "Hello ACS CallAutomation!");
-
-app.MapGet("/testcall", async (ILogger<Program> logger) =>
+MediaSdkEventListener? listener = null;
+try
 {
-    // Send test message to AcsMediaStreamingHandler
-    await acsHandlerInstance.WriteInputStream("What is the weather today in redmond");
-    return Results.Ok(new { message = "Sent test message to open AI" });
+    listener = new MediaSdkEventListener();
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"MediaSdkEventListener init skipped: {ex.Message}");
+}
+
+var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger<Program>();
+
+var appBaseUrl = builder.Configuration.GetValue<string>("AppBaseUrl");
+
+// Return plain JSON errors instead of HTML error pages
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        context.Response.ContentType = "application/json";
+        context.Response.StatusCode = 500;
+        var error = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>();
+        var message = error?.Error?.Message ?? "Internal server error";
+        startupLogger.LogError(error?.Error, "Unhandled exception");
+        await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new { error = message }));
+    });
 });
 
-app.MapGet("/testclient", async (ILogger<Program> logger) =>
-{
-    if (testCallConnector == null)
-        return Results.Problem("TestCallRoomConnector not initialized");
-    if (acsHandlerInstance == null)
-        acsHandlerInstance = new AcsMediaStreamingHandler(testCallConnector);
+app.UseStaticFiles();
+app.UseRouting();
+app.MapRazorPages();
 
-    // Send test message to media sdk
-    using Stream audioStream = File.OpenRead($"whats_the_weather.wav");
-    using (MemoryStream memoryStream = new MemoryStream())
+app.MapGet("/api/health", (CallSessionManager sessionManager, MediaClient? mc) =>
+{
+    string? origin = null;
+    try { origin = mc?.ServiceOrigin; } catch { }
+    return Results.Ok(new
     {
-        audioStream.CopyTo(memoryStream);
-        await acsHandlerInstance.SendMessageAsync(memoryStream.ToArray());
+        status = "healthy",
+        activeCalls = sessionManager.ActiveCallCount,
+        totalCalls = sessionManager.TotalCallCount,
+        mediaServiceOrigin = origin ?? "not initialized",
+        timestamp = DateTime.UtcNow
+    });
+});
+
+// Polling API for active calls (replaces SSE — more reliable through IIS)
+app.MapGet("/api/calls/active", (CallSessionManager sessionManager) =>
+{
+    var activeSessions = sessionManager.GetActiveSessions().Select(s => new
+    {
+        s.CorrelationId,
+        s.CallConnectionId,
+        s.CallerId,
+        Status = s.Status.ToString(),
+        Duration = s.Duration.ToString(@"hh\:mm\:ss"),
+        s.StartTime
+    });
+    return Results.Ok(new { activeSessions, total = sessionManager.TotalCallCount });
+});
+
+// Polling API for transcript of a specific call
+app.MapGet("/api/calls/{correlationId}/transcript", (
+    string correlationId,
+    int? since,
+    CallSessionManager sessionManager) =>
+{
+    var session = sessionManager.GetSession(correlationId);
+    if (session == null)
+    {
+        // Check completed sessions
+        var completed = sessionManager.GetCompletedSessions()
+            .FirstOrDefault(s => s.CorrelationId == correlationId);
+        if (completed == null)
+            return Results.NotFound(new { ended = true });
+        var allEntries = completed.GetTranscriptSnapshot().Select(t => new
+        {
+            t.Speaker,
+            t.Text,
+            Timestamp = t.Timestamp.ToString("HH:mm:ss")
+        });
+        return Results.Ok(new { entries = allEntries, ended = true, total = allEntries.Count() });
     }
 
-    return Results.Ok(new { message = "Sent test message to room"});
+    var transcript = session.GetTranscriptSnapshot();
+    var startIndex = since ?? 0;
+    var newEntries = transcript.Skip(startIndex).Select(t => new
+    {
+        t.Speaker,
+        t.Text,
+        Timestamp = t.Timestamp.ToString("HH:mm:ss")
+    });
+    return Results.Ok(new { entries = newEntries, ended = false, total = transcript.Count });
 });
 
-app.UseWebSockets();
+// Test endpoint: send whats_the_weather.wav to Media SDK (outgoing audio stream)
+app.MapPost("/api/calls/{correlationId}/test/media", async (
+    string correlationId,
+    CallSessionManager sessionManager,
+    ILogger<Program> logger) =>
+{
+    var session = sessionManager.GetSession(correlationId);
+    if (session?.MediaHandler == null)
+        return Results.NotFound(new { error = "Call session or media handler not found" });
 
+    var wavPath = Path.Combine(AppContext.BaseDirectory, "whats_the_weather.wav");
+    if (!File.Exists(wavPath))
+        return Results.NotFound(new { error = "whats_the_weather.wav not found" });
+
+    using var audioStream = File.OpenRead(wavPath);
+    using var memoryStream = new MemoryStream();
+    await audioStream.CopyToAsync(memoryStream);
+    await session.MediaHandler.SendMessageAsync(memoryStream.ToArray());
+
+    logger.LogInformation("Sent test audio to Media SDK for call {Id}", correlationId);
+    session.AddTranscript("System", "Sent test audio (whats_the_weather.wav) to Media SDK");
+    return Results.Ok(new { message = "Audio sent to Media SDK" });
+});
+
+// Test endpoint: send whats_the_weather.wav to OpenAI service
+app.MapPost("/api/calls/{correlationId}/test/openai", async (
+    string correlationId,
+    CallSessionManager sessionManager,
+    ILogger<Program> logger) =>
+{
+    var session = sessionManager.GetSession(correlationId);
+    if (session?.AiService == null)
+        return Results.NotFound(new { error = "Call session or AI service not found" });
+
+    var wavPath = Path.Combine(AppContext.BaseDirectory, "whats_the_weather.wav");
+    if (!File.Exists(wavPath))
+        return Results.NotFound(new { error = "whats_the_weather.wav not found" });
+
+    using var audioStream = File.OpenRead(wavPath);
+    await session.AiService.SendAudioToExternalAI(audioStream);
+
+    logger.LogInformation("Sent test audio to OpenAI for call {Id}", correlationId);
+    session.AddTranscript("System", "Sent test audio (whats_the_weather.wav) to OpenAI");
+    return Results.Ok(new { message = "Audio sent to OpenAI" });
+});
 
 app.MapPost("/api/incomingCall", async (
     [FromBody] EventGridEvent[] eventGridEvents,
-    ILogger<Program> logger) =>
+    ILogger<Program> logger,
+    CallSessionManager sessionManager,
+    CallAutomationClient acsClient,
+    MediaClient mc) =>
 {
     foreach (var eventGridEvent in eventGridEvents)
     {
-        Console.WriteLine($"Incoming Call event received.");
-
-        // Handle system events
-        if (eventGridEvent.TryGetSystemEventData(out object eventData))
+        try
         {
-            // Handle the subscription validation event.
-            if (eventData is SubscriptionValidationEventData subscriptionValidationEventData)
+            logger.LogInformation("Incoming Call event received.");
+
+            // Handle system events
+            if (eventGridEvent.TryGetSystemEventData(out object eventData))
             {
-                var responseData = new SubscriptionValidationResponse
+                if (eventData is SubscriptionValidationEventData subscriptionValidationEventData)
                 {
-                    ValidationResponse = subscriptionValidationEventData.ValidationCode
-                };
-                return Results.Ok(responseData);
+                    var responseData = new SubscriptionValidationResponse
+                    {
+                        ValidationResponse = subscriptionValidationEventData.ValidationCode
+                    };
+                    return Results.Ok(responseData);
+                }
+            }
+
+            var jsonObject = Helper.GetJsonObject(eventGridEvent.Data);
+            var callerId = Helper.GetCallerId(jsonObject);
+            var incomingCallContext = Helper.GetIncomingCallContext(jsonObject);
+            var callbackUri = new Uri(new Uri(appBaseUrl), $"/api/callbacks/{Guid.NewGuid()}?callerId={callerId}");
+            logger.LogInformation("Callback Url: {CallbackUri}", callbackUri);
+            var websocketUri = appBaseUrl.TrimEnd('/').Replace("https", "wss") + "/ws";
+            logger.LogInformation("WebSocket Url: {WsUri}", websocketUri);
+
+            var mediaStreamingOptions = new MediaStreamingOptions(MediaStreamingAudioChannel.Mixed)
+            {
+                TransportUri = new Uri(websocketUri),
+                MediaStreamingContent = MediaStreamingContent.Audio,
+                StartMediaStreaming = true,
+                EnableBidirectional = true,
+                AudioFormat = AudioFormat.Pcm24KMono
+            };
+
+            var options = new AnswerCallOptions(incomingCallContext, callbackUri)
+            {
+                MediaStreamingOptions = mediaStreamingOptions,
+            };
+
+            AnswerCallResult answerCallResult = await acsClient.AnswerCallAsync(options);
+            var connectionId = answerCallResult.CallConnection.CallConnectionId;
+            var correlationId = answerCallResult.CallConnectionProperties.CorrelationId;
+            logger.LogInformation("Answered call for connection id: {Id}", connectionId);
+
+            // Create per-call session (keyed by correlationId)
+            var session = sessionManager.CreateSession(correlationId, connectionId, callerId);
+
+            // Connect via Media SDK
+            var roomConnector = new TestCallRoomConnector(mc, logger, app.Services);
+            session.RoomConnector = roomConnector;
+
+            var connected = await roomConnector.ConnectAsync(correlationId);
+            if (connected)
+            {
+                logger.LogInformation("MediaSDK connected for call {Id}", correlationId);
+                try
+                {
+                    var mediaHandler = new AcsMediaStreamingHandler(roomConnector);
+                    session.MediaHandler = mediaHandler;
+
+                    var openAIService = new AzureOpenAIService(mediaHandler, builder.Configuration);
+                    openAIService.OnTranscript = (speaker, text) => session.AddTranscript(speaker, text);
+                    session.AiService = openAIService;
+
+                    mediaHandler.aiServiceHandler = openAIService;
+                    roomConnector.aiServiceHandler = openAIService;
+                    openAIService.StartConversation();
+
+                    session.Status = CallStatus.Active;
+                    logger.LogInformation("AI service started for call {Id}", correlationId);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Failed to start AI service for call {Id}", correlationId);
+                    sessionManager.FailSession(correlationId, ex.Message);
+                }
+            }
+            else
+            {
+                logger.LogError("MediaSDK connection failed for call {Id}: {Error}", correlationId, roomConnector.LastError);
+                sessionManager.FailSession(correlationId, roomConnector.LastError ?? "MediaSDK connection failed");
             }
         }
-
-        var jsonObject = Helper.GetJsonObject(eventGridEvent.Data);
-        var callerId = Helper.GetCallerId(jsonObject);
-        var incomingCallContext = Helper.GetIncomingCallContext(jsonObject);
-        var callbackUri = new Uri(new Uri(appBaseUrl), $"/api/callbacks/{Guid.NewGuid()}?callerId={callerId}");
-        logger.LogInformation($"Callback Url: {callbackUri}");
-        var websocketUri = appBaseUrl.Replace("https", "wss") + "/ws";
-        logger.LogInformation($"WebSocket Url: {websocketUri}");
-
-        var mediaStreamingOptions = new MediaStreamingOptions(MediaStreamingAudioChannel.Mixed)
+        catch (Exception ex)
         {
-            TransportUri = new Uri(websocketUri),
-            MediaStreamingContent = MediaStreamingContent.Audio,
-            StartMediaStreaming = true,
-            EnableBidirectional = true,
-            AudioFormat = AudioFormat.Pcm24KMono
-        };
-
-        var options = new AnswerCallOptions(incomingCallContext, callbackUri)
-        {
-            MediaStreamingOptions = mediaStreamingOptions,
-        };
-
-        AnswerCallResult answerCallResult = await client.AnswerCallAsync(options);
-        logger.LogInformation($"Answered call for connection id: {answerCallResult.CallConnection.CallConnectionId}");
-
-        var connected = await testCallConnector.ConnectAsync(answerCallResult.CallConnectionProperties.CorrelationId);
-        if (connected)
-        {
-            startupLogger.LogInformation($"TestCallRoomConnector started and connected to {answerCallResult.CallConnectionProperties.CorrelationId}");
-            try
-            {
-                // Start AzureOpenAIService after connection
-                // Provide a dummy AcsMediaStreamingHandler for initialization
-                acsHandlerInstance = new AcsMediaStreamingHandler(testCallConnector);
-                var openAIService = new AzureOpenAIService(acsHandlerInstance, builder.Configuration);
-                acsHandlerInstance.aiServiceHandler = openAIService;
-                testCallConnector.aiServiceHandler = openAIService;
-                openAIService.StartConversation();
-                startupLogger.LogInformation("AzureOpenAIService started after TestCallRoomConnector connection.");
-            }
-            catch (Exception ex)
-            {
-                startupLogger.LogError($"Failed to start AzureOpenAIService: {ex.Message}");
-            }
-        }
-        else
-        {
-            startupLogger.LogError($"TestCallRoomConnector failed: {testCallConnector.LastError}");
+            logger.LogError(ex, "Unhandled error processing incoming call event");
         }
     }
     return Results.Ok();
 });
 
-// api to handle call back events
+// Handle call automation callback events
 app.MapPost("/api/callbacks/{contextId}", async (
     [FromBody] CloudEvent[] cloudEvents,
     [FromRoute] string contextId,
     [Required] string callerId,
-    ILogger<Program> logger) =>
+    ILogger<Program> logger,
+    CallSessionManager sessionManager) =>
 {
     foreach (var cloudEvent in cloudEvents)
     {
         CallAutomationEventBase @event = CallAutomationEventParser.Parse(cloudEvent);
-        logger.LogInformation($"Event received: {JsonConvert.SerializeObject(@event, Formatting.Indented)}");
+        logger.LogInformation("Callback event received: {Type}", @event.GetType().Name);
+
+        // Clean up session when call disconnects (lookup by CallConnectionId from ACS event)
+        if (@event is CallDisconnected disconnected)
+        {
+            logger.LogInformation("Call disconnected: {Id}", disconnected.CallConnectionId);
+            sessionManager.EndSessionByCallConnectionId(disconnected.CallConnectionId);
+        }
     }
 
     return Results.Ok();
 });
-
 
 app.Use(async (context, next) =>
 {
@@ -187,6 +352,5 @@ app.Use(async (context, next) =>
 });
 
 app.UseWebSockets();
-
 
 app.Run();            

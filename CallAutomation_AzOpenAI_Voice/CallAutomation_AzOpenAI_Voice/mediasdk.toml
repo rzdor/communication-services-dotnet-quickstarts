@@ -14,6 +14,7 @@
 
 [general]
 debug_mode = true
+feed_topic_name = "conversation"
 
 # Enable Europe compliance mode
 # europe_compliant = false
@@ -61,3 +62,4 @@ wb_frontdoor_url = "https://dev.mediabroker.communications.core.dev.microsoft"
 
 #[seep.dev]
 #feed_id_name = "dev_override_feed"
+#feed_topic_name = "conversation"

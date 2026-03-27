@@ -1,0 +1,104 @@
+@page
+@model CallDetailModel
+@{
+    ViewData["Title"] = "Call Detail";
+}
+
+<h1>
+    Call Detail
+    @if (Model.Session != null)
+    {
+        <span class="badge badge-@Model.Session.Status.ToString().ToLower()" style="font-size: 14px; vertical-align: middle;">
+            @Model.Session.Status
+        </span>
+    }
+</h1>
+
+@if (Model.Session == null)
+{
+    <div class="card">
+        <div class="empty-state">
+            <div class="empty-state-icon">❓</div>
+            <p>Call session not found.</p>
+            <a href="/" class="btn btn-primary" style="margin-top: 12px;">Back to Active Calls</a>
+        </div>
+    </div>
+}
+else
+{
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="stat-label">Caller ID</div>
+            <div style="font-size: 16px; font-weight: 600;">@Model.Session.CallerId</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Duration</div>
+            <div style="font-size: 16px; font-weight: 600;">@Model.Session.Duration.ToString(@"hh\:mm\:ss")</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Started</div>
+            <div style="font-size: 16px; font-weight: 600;">@Model.Session.StartTime.ToString("HH:mm:ss")</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Correlation ID</div>
+            <div style="font-size: 12px; font-weight: 400; word-break: break-all;">@Model.Session.CorrelationId</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Transcript</h2>
+        <div class="transcript-container" id="transcript">
+            @if (Model.Transcript.Count == 0)
+            {
+                <div class="empty-state" id="empty-transcript">
+                    <p>Waiting for conversation...</p>
+                </div>
+            }
+            @foreach (var entry in Model.Transcript)
+            {
+                <div class="transcript-entry">
+                    <span class="transcript-speaker @entry.Speaker.ToLower()">@entry.Speaker</span>
+                    <span class="transcript-time">@entry.Timestamp.ToString("HH:mm:ss")</span>
+                    <div class="transcript-text">@entry.Text</div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@section Scripts {
+@if (Model.Session != null && !Model.IsCompleted)
+{
+<script>
+    (function() {
+        const callId = '@Model.Session.CorrelationId';
+        const container = document.getElementById('transcript');
+        let transcriptIndex = @Model.Transcript.Count;
+
+        startPolling('/api/calls/' + callId + '/transcript?since=' + transcriptIndex, function(data) {
+            if (data.ended && !data.entries.length) {
+                const div = document.createElement('div');
+                div.className = 'transcript-entry';
+                div.innerHTML = '<span class="transcript-speaker" style="color: var(--text-secondary);">System</span><div class="transcript-text"><em>Call ended</em></div>';
+                container.appendChild(div);
+                return;
+            }
+
+            const empty = document.getElementById('empty-transcript');
+            if (empty && data.entries.length) empty.remove();
+
+            data.entries.forEach(function(entry) {
+                const div = document.createElement('div');
+                div.className = 'transcript-entry';
+                div.innerHTML = '<span class="transcript-speaker ' + entry.Speaker.toLowerCase() + '">' + entry.Speaker + '</span>'
+                    + '<span class="transcript-time">' + entry.Timestamp + '</span>'
+                    + '<div class="transcript-text">' + entry.Text + '</div>';
+                container.appendChild(div);
+            });
+            if (data.entries.length) container.scrollTop = container.scrollHeight;
+            transcriptIndex = data.total;
+        }, 2000);
+    })();
+</script>
+}
+}

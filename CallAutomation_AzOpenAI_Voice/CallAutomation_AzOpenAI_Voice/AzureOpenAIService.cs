@@ -7,12 +7,16 @@ using OpenAI.RealtimeConversation;
 #pragma warning disable OPENAI002
 namespace CallAutomationOpenAI
 {
-    public class AzureOpenAIService
+    public class AzureOpenAIService : IDisposable
     {
         private CancellationTokenSource m_cts;
         private RealtimeConversationSession m_aiSession;
         private AcsMediaStreamingHandler m_mediaStreaming;
+        private bool _disposed;
         private string m_answerPromptSystemTemplate = "You are an AI assistant that helps people find information.";
+
+        // Callback for transcript events (speaker, text)
+        public Action<string, string>? OnTranscript { get; set; }
 
         public AzureOpenAIService(AcsMediaStreamingHandler mediaStreaming, IConfiguration configuration)
         {            
@@ -92,11 +96,11 @@ namespace CallAutomationOpenAI
                         Console.WriteLine($"  -- Begin streaming of new item");
                     }
 
-                    // Audio transcript  updates contain the incremental text matching the generated
-                    // output audio.
+                    // Audio transcript updates contain the incremental text matching the generated output audio.
                     if (update is ConversationItemStreamingAudioTranscriptionFinishedUpdate outputTranscriptDeltaUpdate)
                     {
                         Console.Write(outputTranscriptDeltaUpdate.Transcript);
+                        OnTranscript?.Invoke("AI", outputTranscriptDeltaUpdate.Transcript);
                     }
 
                     // Audio delta updates contain the incremental binary audio data of the generated output
@@ -120,6 +124,7 @@ namespace CallAutomationOpenAI
                         Console.WriteLine();
                         Console.WriteLine($"  -- User audio transcript: {transcriptionCompletedUpdate.Transcript}");
                         Console.WriteLine();
+                        OnTranscript?.Invoke("User", transcriptionCompletedUpdate.Transcript);
                     }
 
                     if (update is ConversationResponseFinishedUpdate turnFinishedUpdate)
@@ -157,9 +162,16 @@ namespace CallAutomationOpenAI
 
         public void Close()
         {
+            if (_disposed) return;
             m_cts.Cancel();
             m_cts.Dispose();
             m_aiSession.Dispose();
+            _disposed = true;
+        }
+
+        public void Dispose()
+        {
+            Close();
         }
     }
 }
