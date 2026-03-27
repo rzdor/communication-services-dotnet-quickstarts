@@ -13,7 +13,14 @@ namespace CallAutomationOpenAI
         private RealtimeConversationSession m_aiSession;
         private AcsMediaStreamingHandler m_mediaStreaming;
         private bool _disposed;
-        private string m_answerPromptSystemTemplate = "You are an AI assistant that helps people find information.";
+        private string m_answerPromptSystemTemplate = @"Your name is Sidney. You are a helpful AI voice assistant.
+
+IMPORTANT RULES:
+- Only respond when the user addresses you by name (""Sidney"", ""Hey Sidney"", ""Hi Sidney"", etc.)
+- If the user's speech does not mention your name ""Sidney"", do NOT respond at all — remain completely silent.
+- Ignore background noise, side conversations, and any speech not directed at you.
+- When addressed by name, be helpful, concise, and conversational.
+- If someone says just ""Sidney"" without a question, respond with a brief acknowledgment like ""Yes, I'm here. How can I help?""";
 
         // Callback for transcript events (speaker, text)
         public Action<string, string>? OnTranscript { get; set; }
@@ -35,7 +42,7 @@ namespace CallAutomationOpenAI
 
             var openAiModelName = configuration.GetValue<string>("AzureOpenAIDeploymentModelName");
             ArgumentNullException.ThrowIfNullOrEmpty(openAiModelName);
-            var systemPrompt = configuration.GetValue<string>("SystemPrompt") ?? m_answerPromptSystemTemplate;
+            var systemPrompt = m_answerPromptSystemTemplate;
             ArgumentNullException.ThrowIfNullOrEmpty(openAiUri);
 
             var aiClient = new AzureOpenAIClient(new Uri(openAiUri), new ApiKeyCredential(openAiKey));
@@ -54,7 +61,7 @@ namespace CallAutomationOpenAI
                 {
                     Model = "whisper-1",
                 },
-                TurnDetectionOptions = ConversationTurnDetectionOptions.CreateServerVoiceActivityTurnDetectionOptions(0.5f, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500)),
+                TurnDetectionOptions = ConversationTurnDetectionOptions.CreateServerVoiceActivityTurnDetectionOptions(0.6f, TimeSpan.FromMilliseconds(2000), TimeSpan.FromMilliseconds(800)),
             };
 
             await session.ConfigureSessionAsync(sessionOptions);
