@@ -59,6 +59,7 @@ namespace CallAutomation_AzOpenAI_Voice.Models
         public void Dispose()
         {
             try { AiService?.Close(); } catch { }
+            try { RoomConnector?.Disconnect(); } catch { }
             AiService = null;
             RoomConnector = null;
             MediaHandler = null;

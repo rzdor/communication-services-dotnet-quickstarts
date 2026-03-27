@@ -15,6 +15,8 @@ public class TestCallRoomConnector
     private readonly ILogger _logger;
     private readonly IServiceProvider _serviceProvider;
     private bool _connected;
+    private MediaConnection? _connection;
+    private MediaSession? _session;
     public string? LastError { get; private set; }
     public OutgoingAudioStream OutgoingAudioStream { get; private set; }
     public AzureOpenAIService aiServiceHandler { get; set; }
@@ -33,32 +35,25 @@ public class TestCallRoomConnector
             string serviceOrigin = _mediaClient.ServiceOrigin;
             _logger.LogInformation($"Service Origin URL: {serviceOrigin}");
 
-            // This is our connection to a WB endpoint.
-            var _connection = await _mediaClient.CreateMediaConnectionAsync();
+            _connection = await _mediaClient.CreateMediaConnectionAsync();
 
             _logger.LogInformation($"MediaConnection {_connection.ConnectionState} {_connection.EndpointId}");
 
-            // We have two sources of events: connection itself (for state change events, stats reports), and the session (for media/data events).
             _connection.OnStateChanged += OnConnectionStateChanged;
             _connection.OnStatsReportReceived += OnStatsReportReceived;
 
-            // Now that connection is ready, we can use it to join specific sessions.
-            var _session = await _connection.JoinAsync(
+            _session = await _connection.JoinAsync(
                 sessionId: sessionId,
                 mediaSessionJoinOptions: new MediaSessionJoinOptions() { IncomingDataPayloadTypes = [5] });
+
+            OutgoingAudioStream = _session.AddOutgoingAudioStream();
 
             _session.OnIncomingAudioStreamAdded += OnIncomingAudioStreamAdded;
             _session.OnIncomingAudioStreamRemoved += OnIncomingAudioStreamRemoved;
             _session.OnIncomingDataStreamAdded += OnIncomingDataStreamAdded;
             _session.OnIncomingDataStreamRemoved += OnIncomingDataStreamRemoved;
 
-            await Task.Delay(500);
-            OutgoingAudioStream = _session.AddOutgoingAudioStream();
-
             _logger.LogInformation($"MediaConnection {_connection.ConnectionState}");
-            // If you need to start media streaming, do it here
-            // var mediaService = new AcsMediaStreamingHandler(_session, ...);
-            // await mediaService.ProcessConnectionAsync();
 
             _connected = true;
             return true;
@@ -70,6 +65,16 @@ public class TestCallRoomConnector
             _connected = false;
             return false;
         }
+    }
+
+    public void Disconnect()
+    {
+        _connected = false;
+        try { _session?.Dispose(); } catch { }
+        try { _connection?.Dispose(); } catch { }
+        _session = null;
+        _connection = null;
+        _logger.LogInformation("MediaSDK disconnected");
     }
 
     private void OnConnectionStateChanged(object? sender, ConnectionStateChangedEventArgs e)
@@ -108,10 +113,8 @@ public class TestCallRoomConnector
 
     private void OnIncomingAudioStreamReceived(object? sender, IncomingAudioStreamReceivedEventArgs args)
     {
-        if (aiServiceHandler != null)
-        {
-            using var _ = aiServiceHandler.SendAudioToExternalAI(new MemoryStream(args.Data.ReadDataAsSpan().ToArray()));
-        }
+        if (!_connected || aiServiceHandler == null) return;
+        using var _ = aiServiceHandler.SendAudioToExternalAI(new MemoryStream(args.Data.ReadDataAsSpan().ToArray()));
     }
 
     private void OnIncomingAudioStreamRemoved(object? sender, IncomingAudioStreamRemovedEventArgs e)

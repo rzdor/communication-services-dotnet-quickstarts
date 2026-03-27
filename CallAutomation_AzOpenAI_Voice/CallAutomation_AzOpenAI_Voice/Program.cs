@@ -23,31 +23,24 @@ AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
 // Add Razor Pages
 builder.Services.AddRazorPages();
 
-// Register MediaClient as singleton (lazy — created on first use to avoid startup crash if config is missing)
-MediaClient? mediaClient = null;
-builder.Services.AddSingleton<MediaClient>(sp =>
+// Register clients as transient — created fresh per request
+builder.Services.AddTransient<MediaClient>(sp =>
 {
-    if (mediaClient != null) return mediaClient;
     var config = sp.GetRequiredService<IConfiguration>();
     var connStr = config.GetValue<string>("MediaSDKConnectionString");
     if (string.IsNullOrEmpty(connStr) || connStr.StartsWith("<"))
         throw new InvalidOperationException("MediaSDKConnectionString is not configured. Set it in App Service Application Settings.");
     var options = new MediaClientOptions("dev", false, TimeSpan.FromSeconds(10));
-    mediaClient = new MediaClient(connStr, options);
-    return mediaClient;
+    return new MediaClient(connStr, options);
 });
 
-// Register CallAutomationClient as singleton (lazy)
-CallAutomationClient? callAutomationClient = null;
-builder.Services.AddSingleton<CallAutomationClient>(sp =>
+builder.Services.AddTransient<CallAutomationClient>(sp =>
 {
-    if (callAutomationClient != null) return callAutomationClient;
     var config = sp.GetRequiredService<IConfiguration>();
     var connStr = config.GetValue<string>("AcsConnectionString");
     if (string.IsNullOrEmpty(connStr) || connStr.StartsWith("<"))
         throw new InvalidOperationException("AcsConnectionString is not configured. Set it in App Service Application Settings.");
-    callAutomationClient = new CallAutomationClient(connStr);
-    return callAutomationClient;
+    return new CallAutomationClient(connStr);
 });
 
 // Register CallSessionManager as singleton
@@ -89,19 +82,17 @@ app.UseExceptionHandler(errorApp =>
 });
 
 app.UseStaticFiles();
+app.UseWebSockets();
 app.UseRouting();
 app.MapRazorPages();
 
-app.MapGet("/api/health", (CallSessionManager sessionManager, MediaClient? mc) =>
+app.MapGet("/api/health", (CallSessionManager sessionManager) =>
 {
-    string? origin = null;
-    try { origin = mc?.ServiceOrigin; } catch { }
     return Results.Ok(new
     {
         status = "healthy",
         activeCalls = sessionManager.ActiveCallCount,
         totalCalls = sessionManager.TotalCallCount,
-        mediaServiceOrigin = origin ?? "not initialized",
         timestamp = DateTime.UtcNow
     });
 });
@@ -350,7 +341,5 @@ app.Use(async (context, next) =>
         await next(context);
     }
 });
-
-app.UseWebSockets();
 
 app.Run();            

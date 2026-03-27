@@ -12,7 +12,6 @@ public class AcsMediaStreamingHandler
       
     public async Task SendMessageAsync(byte[] message)
     {
-        Console.WriteLine($"SendMessageAsync -> {message.Length}");
         if (m_roomConnector != null && m_roomConnector.OutgoingAudioStream != null)
         {
             m_roomConnector.OutgoingAudioStream.Write(message);
