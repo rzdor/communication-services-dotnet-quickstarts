@@ -32,6 +32,7 @@ namespace CallingQuickstart
         private LocalVideoEffectsFeature localVideoEffectsFeature;
 
         private IncomingCall incomingCall;
+        private readonly List<RemoteParticipant> remoteParticipantsList = new List<RemoteParticipant>();
 
         #region Page initialization
         public MainPage()
@@ -353,11 +354,13 @@ namespace CallingQuickstart
                     }
                 }
                 participant.VideoStreamStateChanged -= OnVideoStreamStateChanged;
+                remoteParticipantsList.Remove(participant);
             }
 
             foreach (var participant in addedParticipants)
             {
                 participant.VideoStreamStateChanged += OnVideoStreamStateChanged;
+                remoteParticipantsList.Add(participant);
             }
         }
 
