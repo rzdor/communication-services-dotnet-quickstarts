@@ -5,6 +5,7 @@ using Azure.Communication.CallAutomation;
 using Azure.Messaging;
 using Azure.Messaging.EventGrid;
 using Azure.Messaging.EventGrid.SystemEvents;
+using Call_Automation_GCCH.Logging;
 using Call_Automation_GCCH.Models;
 using Call_Automation_GCCH.Services;
 using Microsoft.AspNetCore.Http;
@@ -20,13 +21,13 @@ namespace Call_Automation_GCCH.Controllers
     [Produces("application/json")]
     public class CallAutomationEventsController : ControllerBase
     {
-        private readonly CallAutomationService _service;
+        private readonly ICallAutomationService _service;
         private readonly ILogger<CallAutomationEventsController> _logger;
-        private readonly ConfigurationRequest _config; // final, bound object
+        private readonly AcsCommunicationSettings _config;
 
         public CallAutomationEventsController(
-            CallAutomationService service,
-            ILogger<CallAutomationEventsController> logger, IOptions<ConfigurationRequest> configOptions)
+            ICallAutomationService service,
+            ILogger<CallAutomationEventsController> logger, IOptions<AcsCommunicationSettings> configOptions)
         {
             _service = service ?? throw new ArgumentNullException(nameof(service));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -115,7 +116,7 @@ namespace Call_Automation_GCCH.Controllers
                             {
                                 try
                                 {
-                                    CallAutomationService.SetRecordingLocation(statusUpdated.RecordingStorageInfo.RecordingChunks[0].ContentLocation);
+                                    _service.RecordingLocation = statusUpdated.RecordingStorageInfo.RecordingChunks[0].ContentLocation;
                                     _logger.LogInformation($"The recording location is: {statusUpdated.RecordingStorageInfo.RecordingChunks[0].ContentLocation}");
                                 }
                                 catch (Exception recordingEx)
@@ -594,7 +595,7 @@ namespace Call_Automation_GCCH.Controllers
                             {
                                 try
                                 {
-                                    CallAutomationService.SetRecordingLocation(statusUpdated.RecordingStorageInfo.RecordingChunks[0].ContentLocation);
+                                    _service.RecordingLocation = statusUpdated.RecordingStorageInfo.RecordingChunks[0].ContentLocation;
                                     _logger.LogInformation($"The recording location is: {statusUpdated.RecordingStorageInfo.RecordingChunks[0].ContentLocation}");
                                 }
                                 catch (Exception recordingEx)
@@ -620,48 +621,7 @@ namespace Call_Automation_GCCH.Controllers
 
         #endregion
     }
+
+
+
 }
-
-
-
-//app.MapPost("/setConfigurations", (ConfigurationRequest configurationRequest, CallAutomationService service, ILogger<Program> logger) =>
-//{
-//    try
-//    {
-//        logger.LogInformation("Setting configurations...");
-
-//        acsConnectionString = string.Empty;
-//        acsPhoneNumber = string.Empty;
-//        callbackUriHost = string.Empty;
-//     //   fileSourceUri = string.Empty;
-
-//        if (configurationRequest != null)
-//        {
-//            configuration.AcsConnectionString = !string.IsNullOrEmpty(configurationRequest.AcsConnectionString)
-//                ? configurationRequest.AcsConnectionString
-//                : throw new ArgumentNullException(nameof(configurationRequest.AcsConnectionString));
-
-//            configuration.pmaEndpoint = !string.IsNullOrEmpty(configurationRequest.pmaEndpoint) ? configurationRequest.pmaEndpoint : throw new ArgumentNullException(nameof(configurationRequest.pmaEndpoint));
-//            //configuration.CongnitiveServiceEndpoint = !string.IsNullOrEmpty(configurationRequest.CongnitiveServiceEndpoint) ? configurationRequest.CongnitiveServiceEndpoint : throw new ArgumentNullException(nameof(configurationRequest.CongnitiveServiceEndpoint));
-//            configuration.AcsPhoneNumber = !string.IsNullOrEmpty(configurationRequest.AcsPhoneNumber) ? configurationRequest.AcsPhoneNumber : throw new ArgumentNullException(nameof(configurationRequest.AcsPhoneNumber));
-//            configuration.CallbackUriHost = !string.IsNullOrEmpty(configurationRequest.CallbackUriHost) ? configurationRequest.CallbackUriHost : throw new ArgumentNullException(nameof(configurationRequest.CallbackUriHost));
-//            service.SetConfiguration(configurationRequest);
-//        }
-
-//        acsConnectionString = configuration.AcsConnectionString;
-//        acsPhoneNumber = configuration.AcsPhoneNumber;
-//        callbackUriHost = configuration.CallbackUriHost;
-//        //  fileSourceUri = "https://sample-videos.com/audio/mp3/crowd-cheering.mp3";
-
-//        logger.LogInformation($"Configuration set: AcsPhoneNumber={acsPhoneNumber}, CallbackUriHost={callbackUriHost}");
-
-//        client = new CallAutomationClient(connectionString: acsConnectionString);
-//        logger.LogInformation("Initialized call automation client.");
-//        return Results.Ok("Configuration set successfully. Initialized call automation client.");
-//    }
-//    catch (Exception ex)
-//    {
-//        logger.LogError($"Error in setConfigurations: {ex.Message}");
-//        return Results.Problem($"Failed to set configuration: {ex.Message}");
-//    }
-//}).WithTags("1. Add Connection string and configuration settings.");

@@ -1,4 +1,3 @@
-﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -18,219 +17,195 @@ namespace Call_Automation_GCCH.Controllers
     [Produces("application/json")]
     public class MediaController : ControllerBase
     {
-        private readonly CallAutomationService _service;
+        private readonly ICallAutomationService _service;
         private readonly ILogger<MediaController> _logger;
-        private readonly ConfigurationRequest _config;
+        private readonly AcsCommunicationSettings _config;
 
         public MediaController(
-            CallAutomationService service,
+            ICallAutomationService service,
             ILogger<MediaController> logger,
-            IOptions<ConfigurationRequest> configOptions)
+            IOptions<AcsCommunicationSettings> configOptions)
         {
             _service = service ?? throw new ArgumentNullException(nameof(service));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _config = configOptions.Value ?? throw new ArgumentNullException(nameof(configOptions));
         }
 
-        // ───────────── PLAY FILE SOURCE ────────────────────────────────────────────
-        [HttpPost("/playFileSourceToTargetAsync")]
-        [Tags("Play FileSource Media")]
-        public Task<IActionResult> PlayFileSourceToTargetAsync(
-            string callConnectionId,
-            string target)
-        {
-            if (string.IsNullOrEmpty(target))
-                return Task.FromResult<IActionResult>(BadRequest("Target is required"));
-                
-            if (!target.StartsWith("8:") && !target.StartsWith("+"))
-                return Task.FromResult<IActionResult>(BadRequest("PSTN number must include country code (e.g., +1 for US)"));
-                
-            CommunicationIdentifier identifier = target.StartsWith("8:") 
-                ? new CommunicationUserIdentifier(target)
-                : new PhoneNumberIdentifier(target);
-                
-            return HandlePlayFileSource(
-                callConnectionId,
-                new List<CommunicationIdentifier> { identifier },
-                playToAll: false,
-                bargeIn: false,
-                async: true);
-        }
-
-        [HttpPost("/playFileSourceToTarget")]
-        [Tags("Play FileSource Media")]
-        public IActionResult PlayFileSourceToTarget(
-            string callConnectionId,
-            string target)
-        {
-            if (string.IsNullOrEmpty(target))
-                return BadRequest("Target is required");
-                
-            if (!target.StartsWith("8:") && !target.StartsWith("+"))
-                return BadRequest("PSTN number must include country code (e.g., +1 for US)");
-                
-            CommunicationIdentifier identifier = target.StartsWith("8:") 
-                ? new CommunicationUserIdentifier(target)
-                : new PhoneNumberIdentifier(target);
-                
-            return HandlePlayFileSource(
-                callConnectionId,
-                new List<CommunicationIdentifier> { identifier },
-                playToAll: false,
-                bargeIn: false,
-                async: false).Result;
-        }
-
-        [HttpPost("/playFileSourceToAllAsync")]
-        [Tags("Play FileSource Media")]
-        public Task<IActionResult> PlayFileSourceToAllAsync(string callConnectionId)
-            => HandlePlayFileSource(callConnectionId, targets: null, playToAll: true, bargeIn: false, async: true);
-
-        [HttpPost("/playFileSourceToAll")]
-        [Tags("Play FileSource Media")]
-        public IActionResult PlayFileSourceToAll(string callConnectionId)
-            => HandlePlayFileSource(callConnectionId, targets: null, playToAll: true, bargeIn: false, async: false).Result;
-
-        [HttpPost("/playFileSourceBargeInAsync")]
-        [Tags("Play FileSource Media")]
-        public Task<IActionResult> PlayFileSourceBargeInAsync(string callConnectionId)
-            => HandlePlayFileSource(callConnectionId, targets: null, playToAll: true, bargeIn: true, async: true);
-
-        [HttpPost("/interruptHoldWithPlay")]
-        [Tags("Play FileSource Media")]
-        public IActionResult InterruptHoldWithPlay(
-            string callConnectionId,
-            string target)
-        {
-            if (string.IsNullOrEmpty(target))
-                return BadRequest("Target is required");
-                
-            if (!target.StartsWith("8:") && !target.StartsWith("+"))
-                return BadRequest("PSTN number must include country code (e.g., +1 for US)");
-                
-            CommunicationIdentifier identifier = target.StartsWith("8:") 
-                ? new CommunicationUserIdentifier(target)
-                : new PhoneNumberIdentifier(target);
-                
-            return HandlePlayFileSource(
-                callConnectionId,
-                new List<CommunicationIdentifier> { identifier },
-                playToAll: false,
-                bargeIn: true,
-                async: false).Result;
-        }
-
-        // ──────────── MEDIA STREAMING: CREATE CALL ─────────────────────────────────
-        /// <summary>
-        /// Creates a call with media streaming capabilities asynchronously
-        /// </summary>
-        /// <param name="target">Target phone number (with country code) or communication user ID</param>
-        /// <param name="isMixed">True for mixed audio channel (all participants combined), false for unmixed (separate streams)</param>
-        /// <param name="enableMediaStreaming">Whether to enable media streaming</param>
-        /// <param name="isEnableBidirectional">Whether to enable bidirectional streaming</param>
-        /// <param name="isPcm24kMono">Whether to use PCM 24kHz mono format</param>
-        [HttpPost("/createCallWithMediaStreamingAsync")]
-        [Tags("Media Streaming")]
-        public Task<IActionResult> CreateCallWithMediaStreamingAsync(
-            string target,
-            bool isMixed = true,
-            bool enableMediaStreaming = false,
-            bool isEnableBidirectional = false,
-            bool isPcm24kMono = false)
-        {
-            if (string.IsNullOrEmpty(target))
-                return Task.FromResult<IActionResult>(BadRequest("Target is required"));
-                
-            if (!target.StartsWith("8:") && !target.StartsWith("+"))
-                return Task.FromResult<IActionResult>(BadRequest("PSTN number must include country code (e.g., +1 for US)"));
-                
-            var audioChannel = isMixed ? MediaStreamingAudioChannel.Mixed : MediaStreamingAudioChannel.Unmixed;
-                
-            return HandleCreateCallWithMediaStreaming(
-                target,
-                audioChannel,
-                enableMediaStreaming,
-                isEnableBidirectional,
-                isPcm24kMono,
-                async: true);
-        }
+        #region Play � 3 overloads: PlayOptions | PlaySource,targets | IEnumerable<PlaySource>,targets
 
         /// <summary>
-        /// Creates a call with media streaming capabilities synchronously
+        /// Plays audio to specific target(s).
+        /// useOptions=true  ? Play(PlayOptions) with all configurable fields.
+        /// useOptions=false ? Play(PlaySource, targets) simple overload.
         /// </summary>
-        /// <param name="target">Target phone number (with country code) or communication user ID</param>
-        /// <param name="isMixed">True for mixed audio channel (all participants combined), false for unmixed (separate streams)</param>
-        /// <param name="enableMediaStreaming">Whether to enable media streaming</param>
-        /// <param name="isEnableBidirectional">Whether to enable bidirectional streaming</param>
-        /// <param name="isPcm24kMono">Whether to use PCM 24kHz mono format</param>
-        [HttpPost("/createCallWithMediaStreaming")]
-        [Tags("Media Streaming")]
-        public IActionResult CreateCallWithMediaStreaming(
-            string target,
-            bool isMixed = true,
-            bool enableMediaStreaming = false,
-            bool isEnableBidirectional = false,
-            bool isPcm24kMono = false)
-        {
-            if (string.IsNullOrEmpty(target))
-                return BadRequest("Target is required");
-                
-            if (!target.StartsWith("8:") && !target.StartsWith("+"))
-                return BadRequest("PSTN number must include country code (e.g., +1 for US)");
-                
-            var audioChannel = isMixed ? MediaStreamingAudioChannel.Mixed : MediaStreamingAudioChannel.Unmixed;
-                
-            return HandleCreateCallWithMediaStreaming(
-                target,
-                audioChannel,
-                enableMediaStreaming,
-                isEnableBidirectional,
-                isPcm24kMono,
-                async: false).Result;
-        }
+        /// <param name="callConnectionId">The call connection ID</param>
+        /// <param name="target">ACS user ID (8:...) or phone number (+...)</param>
+        /// <param name="useOptions">true = PlayOptions overload, false = simple (PlaySource, targets) overload</param>
+        /// <param name="interruptHoldAudio">Interrupts hold audio (PlayOptions only)</param>
+        /// <param name="loop">Loop the audio (PlayOptions only)</param>
+        /// <param name="operationContext">Custom context (PlayOptions only)</param>
+        [HttpPost("/playAsync")]
+        [Tags("Play Media")]
+        public Task<IActionResult> PlayAsync(
+            string callConnectionId, string target,
+            bool useOptions = true,
+            bool interruptHoldAudio = false, bool loop = false,
+            string operationContext = "playContext")
+            => HandlePlay(callConnectionId, target, useOptions, interruptHoldAudio, loop, operationContext, async: true);
 
-        // ──────────── MEDIA STREAMING: START/STOP ─────────────────────────────────
+        [HttpPost("/play")]
+        [Tags("Play Media")]
+        public IActionResult Play(
+            string callConnectionId, string target,
+            bool useOptions = true,
+            bool interruptHoldAudio = false, bool loop = false,
+            string operationContext = "playContext")
+            => HandlePlay(callConnectionId, target, useOptions, interruptHoldAudio, loop, operationContext, async: false).Result;
+
+        #endregion
+
+        #region PlayToAll � 3 overloads: PlayToAllOptions | PlaySource | IEnumerable<PlaySource>
+
+        /// <summary>
+        /// Plays audio to all participants.
+        /// useOptions=true  ? PlayToAll(PlayToAllOptions) with all configurable fields.
+        /// useOptions=false ? PlayToAll(PlaySource) simple overload.
+        /// </summary>
+        /// <param name="callConnectionId">The call connection ID</param>
+        /// <param name="useOptions">true = PlayToAllOptions overload, false = simple (PlaySource) overload</param>
+        /// <param name="interruptCallMediaOperation">Interrupts current media / barge-in (PlayToAllOptions only)</param>
+        /// <param name="loop">Loop the audio (PlayToAllOptions only)</param>
+        /// <param name="operationContext">Custom context (PlayToAllOptions only)</param>
+        [HttpPost("/playToAllAsync")]
+        [Tags("Play Media")]
+        public Task<IActionResult> PlayToAllAsync(
+            string callConnectionId,
+            bool useOptions = true,
+            bool interruptCallMediaOperation = false, bool loop = false,
+            string operationContext = "playToAllContext")
+            => HandlePlayToAll(callConnectionId, useOptions, interruptCallMediaOperation, loop, operationContext, async: true);
+
+        [HttpPost("/playToAll")]
+        [Tags("Play Media")]
+        public IActionResult PlayToAll(
+            string callConnectionId,
+            bool useOptions = true,
+            bool interruptCallMediaOperation = false, bool loop = false,
+            string operationContext = "playToAllContext")
+            => HandlePlayToAll(callConnectionId, useOptions, interruptCallMediaOperation, loop, operationContext, async: false).Result;
+
+        #endregion
+
+        #region Hold � 3 overloads: HoldOptions | identifier | identifier,playSource
+
+        /// <summary>
+        /// Holds a participant.
+        /// useOptions=true  ? Hold(HoldOptions) with OperationContext and optional PlaySource.
+        /// useOptions=false ? Hold(CommunicationIdentifier) or Hold(identifier, PlaySource) simple overloads.
+        /// </summary>
+        /// <param name="callConnectionId">The call connection ID</param>
+        /// <param name="target">ACS user ID (8:...) or phone number (+...)</param>
+        /// <param name="useOptions">true = HoldOptions overload, false = simple overload</param>
+        /// <param name="playHoldMusic">When true, plays hold music</param>
+        /// <param name="operationContext">Custom context (HoldOptions only)</param>
+        [HttpPost("/holdAsync")]
+        [Tags("Hold Management")]
+        public Task<IActionResult> HoldAsync(
+            string callConnectionId, string target,
+            bool useOptions = true, bool playHoldMusic = false,
+            string operationContext = "holdContext")
+            => HandleHold(callConnectionId, target, useOptions, playHoldMusic, operationContext, async: true);
+
+        [HttpPost("/hold")]
+        [Tags("Hold Management")]
+        public IActionResult Hold(
+            string callConnectionId, string target,
+            bool useOptions = true, bool playHoldMusic = false,
+            string operationContext = "holdContext")
+            => HandleHold(callConnectionId, target, useOptions, playHoldMusic, operationContext, async: false).Result;
+
+        #endregion
+
+        #region Unhold � 2 overloads: UnholdOptions | identifier
+
+        /// <summary>
+        /// Unholds a participant.
+        /// useOptions=true  ? Unhold(UnholdOptions).
+        /// useOptions=false ? Unhold(CommunicationIdentifier).
+        /// </summary>
+        [HttpPost("/unholdAsync")]
+        [Tags("Hold Management")]
+        public Task<IActionResult> UnholdAsync(
+            string callConnectionId, string target,
+            bool useOptions = true,
+            string operationContext = "unholdContext")
+            => HandleUnhold(callConnectionId, target, useOptions, operationContext, async: true);
+
+        [HttpPost("/unhold")]
+        [Tags("Hold Management")]
+        public IActionResult Unhold(
+            string callConnectionId, string target,
+            bool useOptions = true,
+            string operationContext = "unholdContext")
+            => HandleUnhold(callConnectionId, target, useOptions, operationContext, async: false).Result;
+
+        #endregion
+
+        #region StartMediaStreaming / StopMediaStreaming � options only
+
+        /// <summary>
+        /// Starts media streaming (StartMediaStreamingOptions overload).
+        /// </summary>
         [HttpPost("/startMediaStreamingAsync")]
         [Tags("Media Streaming")]
-        public Task<IActionResult> StartMediaStreamingAsync(string callConnectionId)
-            => HandleMediaStreaming(callConnectionId, start: true, withOptions: false, async: true);
+        public Task<IActionResult> StartMediaStreamingAsync(
+            string callConnectionId,
+            string operationContext = "StartMediaStreamingContext")
+            => HandleMediaStreaming(callConnectionId, start: true, operationContext, async: true);
 
         [HttpPost("/startMediaStreaming")]
         [Tags("Media Streaming")]
-        public IActionResult StartMediaStreaming(string callConnectionId)
-            => HandleMediaStreaming(callConnectionId, start: true, withOptions: false, async: false).Result;
+        public IActionResult StartMediaStreaming(
+            string callConnectionId,
+            string operationContext = "StartMediaStreamingContext")
+            => HandleMediaStreaming(callConnectionId, start: true, operationContext, async: false).Result;
 
         [HttpPost("/stopMediaStreamingAsync")]
         [Tags("Media Streaming")]
-        public Task<IActionResult> StopMediaStreamingAsync(string callConnectionId)
-            => HandleMediaStreaming(callConnectionId, start: false, withOptions: false, async: true);
+        public Task<IActionResult> StopMediaStreamingAsync(
+            string callConnectionId,
+            string operationContext = "StopMediaStreamingContext")
+            => HandleMediaStreaming(callConnectionId, start: false, operationContext, async: true);
 
         [HttpPost("/stopMediaStreaming")]
         [Tags("Media Streaming")]
-        public IActionResult StopMediaStreaming(string callConnectionId)
-            => HandleMediaStreaming(callConnectionId, start: false, withOptions: false, async: false).Result;
+        public IActionResult StopMediaStreaming(
+            string callConnectionId,
+            string operationContext = "StopMediaStreamingContext")
+            => HandleMediaStreaming(callConnectionId, start: false, operationContext, async: false).Result;
 
-        [HttpPost("/startMediaStreamingWithOptionsAsync")]
+        #endregion
+
+        #region CreateCallWithMediaStreaming
+
+        [HttpPost("/createCallWithMediaStreamingAsync")]
         [Tags("Media Streaming")]
-        public Task<IActionResult> StartMediaStreamingWithOptionsAsync(string callConnectionId)
-            => HandleMediaStreaming(callConnectionId, start: true, withOptions: true, async: true);
+        public Task<IActionResult> CreateCallWithMediaStreamingAsync(
+            string target, bool isMixed = true, bool enableMediaStreaming = false,
+            bool isEnableBidirectional = false, bool isPcm24kMono = false)
+            => HandleCreateCallWithMediaStreaming(target, isMixed, enableMediaStreaming, isEnableBidirectional, isPcm24kMono, async: true);
 
-        [HttpPost("/startMediaStreamingWithOptions")]
+        [HttpPost("/createCallWithMediaStreaming")]
         [Tags("Media Streaming")]
-        public IActionResult StartMediaStreamingWithOptions(string callConnectionId)
-            => HandleMediaStreaming(callConnectionId, start: true, withOptions: true, async: false).Result;
+        public IActionResult CreateCallWithMediaStreaming(
+            string target, bool isMixed = true, bool enableMediaStreaming = false,
+            bool isEnableBidirectional = false, bool isPcm24kMono = false)
+            => HandleCreateCallWithMediaStreaming(target, isMixed, enableMediaStreaming, isEnableBidirectional, isPcm24kMono, async: false).Result;
 
-        [HttpPost("/stopMediaStreamingWithOptionsAsync")]
-        [Tags("Media Streaming")]
-        public Task<IActionResult> StopMediaStreamingWithOptionsAsync(string callConnectionId)
-            => HandleMediaStreaming(callConnectionId, start: false, withOptions: true, async: true);
+        #endregion
 
-        [HttpPost("/stopMediaStreamingWithOptions")]
-        [Tags("Media Streaming")]
-        public IActionResult StopMediaStreamingWithOptions(string callConnectionId)
-            => HandleMediaStreaming(callConnectionId, start: false, withOptions: true, async: false).Result;
+        #region CancelAllMediaOperations
 
-        // ────────────── CANCEL ALL MEDIA ───────────────────────────────────────────
         [HttpPost("/cancelAllMediaOperationAsync")]
         [Tags("Media Operations")]
         public Task<IActionResult> CancelAllMediaOperationAsync(string callConnectionId)
@@ -241,298 +216,358 @@ namespace Call_Automation_GCCH.Controllers
         public IActionResult CancelAllMediaOperation(string callConnectionId)
             => HandleCancelAllMediaOperations(callConnectionId, async: false).Result;
 
-        // ──────────────── RECOGNIZE ────────────────────────────────────────────────
-        [HttpPost("/recognizeDTMFAsync")]
+        #endregion
+
+        #region Recognize � Dtmf, Choice, Speech, SpeechOrDtmf
+
+        /// <summary>
+        /// Starts recognition via StartRecognizing(CallMediaRecognizeOptions).
+        /// </summary>
+        [HttpPost("/startRecognizeAsync")]
         [Tags("Recognition")]
-        public Task<IActionResult> RecognizeDTMFAsync(string callConnectionId, string target)
-        {
-            if (string.IsNullOrEmpty(target))
-                return Task.FromResult<IActionResult>(BadRequest("Target is required"));
-                
-            if (!target.StartsWith("8:") && !target.StartsWith("+"))
-                return Task.FromResult<IActionResult>(BadRequest("PSTN number must include country code (e.g., +1 for US)"));
-                
-            CommunicationIdentifier identifier = target.StartsWith("8:") 
-                ? new CommunicationUserIdentifier(target)
-                : new PhoneNumberIdentifier(target);
-                
-            return HandleRecognize(callConnectionId, identifier, RecognizeType.Dtmf, async: true);
-        }
+        public Task<IActionResult> StartRecognizeAsync(
+            string callConnectionId, string target,
+            string recognizeType = "Dtmf", int maxTonesToCollect = 4,
+            bool interruptPrompt = false,
+            int initialSilenceTimeoutSec = 15, int interToneTimeoutSec = 5, int endSilenceTimeoutSec = 5,
+            string operationContext = "RecognizeContext")
+            => HandleRecognize(callConnectionId, target, recognizeType, maxTonesToCollect, interruptPrompt,
+                initialSilenceTimeoutSec, interToneTimeoutSec, endSilenceTimeoutSec, operationContext, async: true);
 
-        [HttpPost("/recognizeDTMF")]
+        [HttpPost("/startRecognize")]
         [Tags("Recognition")]
-        public IActionResult RecognizeDTMF(string callConnectionId, string target)
-        {
-            if (string.IsNullOrEmpty(target))
-                return BadRequest("Target is required");
-                
-            if (!target.StartsWith("8:") && !target.StartsWith("+"))
-                return BadRequest("PSTN number must include country code (e.g., +1 for US)");
-                
-            CommunicationIdentifier identifier = target.StartsWith("8:") 
-                ? new CommunicationUserIdentifier(target)
-                : new PhoneNumberIdentifier(target);
-                
-            return HandleRecognize(callConnectionId, identifier, RecognizeType.Dtmf, async: false).Result;
-        }
+        public IActionResult StartRecognize(
+            string callConnectionId, string target,
+            string recognizeType = "Dtmf", int maxTonesToCollect = 4,
+            bool interruptPrompt = false,
+            int initialSilenceTimeoutSec = 15, int interToneTimeoutSec = 5, int endSilenceTimeoutSec = 5,
+            string operationContext = "RecognizeContext")
+            => HandleRecognize(callConnectionId, target, recognizeType, maxTonesToCollect, interruptPrompt,
+                initialSilenceTimeoutSec, interToneTimeoutSec, endSilenceTimeoutSec, operationContext, async: false).Result;
 
-        // ──────────── HOLD / UNHOLD ─────────────────────────────────────────────────
-        [HttpPost("/holdTargetAsync")]
-        [Tags("Hold Management")]
-        public Task<IActionResult> HoldTargetAsync(string callConnectionId, string target, bool isPlaySource)
-        {
-            if (string.IsNullOrEmpty(target))
-                return Task.FromResult<IActionResult>(BadRequest("Target is required"));
-                
-            if (!target.StartsWith("8:") && !target.StartsWith("+"))
-                return Task.FromResult<IActionResult>(BadRequest("PSTN number must include country code (e.g., +1 for US)"));
-                
-            CommunicationIdentifier identifier = target.StartsWith("8:") 
-                ? new CommunicationUserIdentifier(target)
-                : new PhoneNumberIdentifier(target);
-                
-            return HandleHold(callConnectionId, identifier, isPlaySource, unhold: false, async: true);
-        }
+        #endregion
 
-        [HttpPost("/holdTarget")]
-        [Tags("Hold Management")]
-        public IActionResult HoldTarget(string callConnectionId, string target, bool isPlaySource)
-        {
-            if (string.IsNullOrEmpty(target))
-                return BadRequest("Target is required");
-                
-            if (!target.StartsWith("8:") && !target.StartsWith("+"))
-                return BadRequest("PSTN number must include country code (e.g., +1 for US)");
-                
-            CommunicationIdentifier identifier = target.StartsWith("8:") 
-                ? new CommunicationUserIdentifier(target)
-                : new PhoneNumberIdentifier(target);
-                
-            return HandleHold(callConnectionId, identifier, isPlaySource, unhold: false, async: false).Result;
-        }
+        #region InterruptAudioAndAnnounce
 
-        [HttpPost("/unholdTargetAsync")]
-        [Tags("Hold Management")]
-        public Task<IActionResult> UnholdTargetAsync(string callConnectionId, string target)
-        {
-            if (string.IsNullOrEmpty(target))
-                return Task.FromResult<IActionResult>(BadRequest("Target is required"));
-                
-            if (!target.StartsWith("8:") && !target.StartsWith("+"))
-                return Task.FromResult<IActionResult>(BadRequest("PSTN number must include country code (e.g., +1 for US)"));
-                
-            CommunicationIdentifier identifier = target.StartsWith("8:") 
-                ? new CommunicationUserIdentifier(target)
-                : new PhoneNumberIdentifier(target);
-                
-            return HandleHold(callConnectionId, identifier, playSource: false, unhold: true, async: true);
-        }
-
-        [HttpPost("/unholdTarget")]
-        [Tags("Hold Management")]
-        public IActionResult UnholdTarget(string callConnectionId, string target)
-        {
-            if (string.IsNullOrEmpty(target))
-                return BadRequest("Target is required");
-                
-            if (!target.StartsWith("8:") && !target.StartsWith("+"))
-                return BadRequest("PSTN number must include country code (e.g., +1 for US)");
-                
-            CommunicationIdentifier identifier = target.StartsWith("8:") 
-                ? new CommunicationUserIdentifier(target)
-                : new PhoneNumberIdentifier(target);
-                
-            return HandleHold(callConnectionId, identifier, playSource: false, unhold: true, async: false).Result;
-        }
-
-        // ────────── INTERRUPT AUDIO AND ANNOUNCE ───────────────────────────────────
         [HttpPost("/interruptAudioAndAnnounceAsync")]
         [Tags("Audio Announcements")]
-        public Task<IActionResult> InterruptAudioAndAnnounceAsync(string callConnectionId, string target)
-        {
-            if (string.IsNullOrEmpty(target))
-                return Task.FromResult<IActionResult>(BadRequest("Target is required"));
-                
-            if (!target.StartsWith("8:") && !target.StartsWith("+"))
-                return Task.FromResult<IActionResult>(BadRequest("PSTN number must include country code (e.g., +1 for US)"));
-                
-            CommunicationIdentifier identifier = target.StartsWith("8:") 
-                ? new CommunicationUserIdentifier(target)
-                : new PhoneNumberIdentifier(target);
-                
-            return HandleInterruptAudioAndAnnounce(callConnectionId, identifier, async: true);
-        }
+        public Task<IActionResult> InterruptAudioAndAnnounceAsync(
+            string callConnectionId, string target, string operationContext = "interruptContext")
+            => HandleInterruptAudioAndAnnounce(callConnectionId, target, operationContext, async: true);
 
         [HttpPost("/interruptAudioAndAnnounce")]
         [Tags("Audio Announcements")]
-        public IActionResult InterruptAudioAndAnnounce(string callConnectionId, string target)
-        {
-            if (string.IsNullOrEmpty(target))
-                return BadRequest("Target is required");
-                
-            if (!target.StartsWith("8:") && !target.StartsWith("+"))
-                return BadRequest("PSTN number must include country code (e.g., +1 for US)");
-                
-            CommunicationIdentifier identifier = target.StartsWith("8:") 
-                ? new CommunicationUserIdentifier(target)
-                : new PhoneNumberIdentifier(target);
-                
-            return HandleInterruptAudioAndAnnounce(callConnectionId, identifier, async: false).Result;
-        }
+        public IActionResult InterruptAudioAndAnnounce(
+            string callConnectionId, string target, string operationContext = "interruptContext")
+            => HandleInterruptAudioAndAnnounce(callConnectionId, target, operationContext, async: false).Result;
 
-        // ───────────── PRIVATE HANDLERS ──────────────────────────────────────────
+        #endregion
 
-        private async Task<IActionResult> HandlePlayFileSource(
-            string callConnectionId,
-            List<CommunicationIdentifier> targets,
-            bool playToAll,
-            bool bargeIn,
-            bool async)
+        #region Transcription � Start/Stop/Update with 2 overloads each
+
+        /// <summary>
+        /// Starts transcription via StartTranscription(StartTranscriptionOptions).
+        /// </summary>
+        [HttpPost("/startTranscriptionAsync")]
+        [Tags("Transcription")]
+        public Task<IActionResult> StartTranscriptionAsync(
+            string callConnectionId, string locale = "en-US", string operationContext = "StartTranscriptionContext")
+            => HandleTranscription(callConnectionId, TranscriptionAction.Start, locale, operationContext, async: true);
+
+        [HttpPost("/startTranscription")]
+        [Tags("Transcription")]
+        public IActionResult StartTranscription(
+            string callConnectionId, string locale = "en-US", string operationContext = "StartTranscriptionContext")
+            => HandleTranscription(callConnectionId, TranscriptionAction.Start, locale, operationContext, async: false).Result;
+
+        [HttpPost("/stopTranscriptionAsync")]
+        [Tags("Transcription")]
+        public Task<IActionResult> StopTranscriptionAsync(
+            string callConnectionId, string operationContext = "StopTranscriptionContext")
+            => HandleTranscription(callConnectionId, TranscriptionAction.Stop, null, operationContext, async: true);
+
+        [HttpPost("/stopTranscription")]
+        [Tags("Transcription")]
+        public IActionResult StopTranscription(
+            string callConnectionId, string operationContext = "StopTranscriptionContext")
+            => HandleTranscription(callConnectionId, TranscriptionAction.Stop, null, operationContext, async: false).Result;
+
+        /// <summary>
+        /// Updates transcription locale.
+        /// useOptions=true  ? UpdateTranscription(UpdateTranscriptionOptions).
+        /// useOptions=false ? UpdateTranscription(string locale).
+        /// </summary>
+        [HttpPost("/updateTranscriptionAsync")]
+        [Tags("Transcription")]
+        public Task<IActionResult> UpdateTranscriptionAsync(
+            string callConnectionId, string locale = "en-US", bool useOptions = false,
+            string operationContext = "UpdateTranscriptionContext")
+            => HandleUpdateTranscription(callConnectionId, locale, useOptions, operationContext, async: true);
+
+        [HttpPost("/updateTranscription")]
+        [Tags("Transcription")]
+        public IActionResult UpdateTranscription(
+            string callConnectionId, string locale = "en-US", bool useOptions = false,
+            string operationContext = "UpdateTranscriptionContext")
+            => HandleUpdateTranscription(callConnectionId, locale, useOptions, operationContext, async: false).Result;
+
+        #endregion
+
+        #region SendDtmfTones � 2 overloads: SendDtmfTonesOptions | (tones, identifier)
+
+        /// <summary>
+        /// useOptions=true  ? SendDtmfTones(SendDtmfTonesOptions).
+        /// useOptions=false ? SendDtmfTones(tones, identifier).
+        /// </summary>
+        [HttpPost("/sendDtmfTonesAsync")]
+        [Tags("Send DTMF")]
+        public Task<IActionResult> SendDtmfTonesAsync(
+            string callConnectionId, string target, string tones = "zero,one",
+            bool useOptions = false, string operationContext = "SendDtmfContext")
+            => HandleSendDtmfTones(callConnectionId, target, tones, useOptions, operationContext, async: true);
+
+        [HttpPost("/sendDtmfTones")]
+        [Tags("Send DTMF")]
+        public IActionResult SendDtmfTones(
+            string callConnectionId, string target, string tones = "zero,one",
+            bool useOptions = false, string operationContext = "SendDtmfContext")
+            => HandleSendDtmfTones(callConnectionId, target, tones, useOptions, operationContext, async: false).Result;
+
+        #endregion
+
+        #region ContinuousDtmf � 2 overloads each: identifier | ContinuousDtmfRecognitionOptions
+
+        /// <summary>
+        /// useOptions=true  ? Start/StopContinuousDtmfRecognition(ContinuousDtmfRecognitionOptions).
+        /// useOptions=false ? Start/StopContinuousDtmfRecognition(CommunicationIdentifier).
+        /// </summary>
+        [HttpPost("/startContinuousDtmfAsync")]
+        [Tags("Continuous DTMF")]
+        public Task<IActionResult> StartContinuousDtmfAsync(
+            string callConnectionId, string target,
+            bool useOptions = false, string operationContext = "StartContinuousDtmfContext")
+            => HandleContinuousDtmf(callConnectionId, target, start: true, useOptions, operationContext, async: true);
+
+        [HttpPost("/startContinuousDtmf")]
+        [Tags("Continuous DTMF")]
+        public IActionResult StartContinuousDtmf(
+            string callConnectionId, string target,
+            bool useOptions = false, string operationContext = "StartContinuousDtmfContext")
+            => HandleContinuousDtmf(callConnectionId, target, start: true, useOptions, operationContext, async: false).Result;
+
+        [HttpPost("/stopContinuousDtmfAsync")]
+        [Tags("Continuous DTMF")]
+        public Task<IActionResult> StopContinuousDtmfAsync(
+            string callConnectionId, string target,
+            bool useOptions = false, string operationContext = "StopContinuousDtmfContext")
+            => HandleContinuousDtmf(callConnectionId, target, start: false, useOptions, operationContext, async: true);
+
+        [HttpPost("/stopContinuousDtmf")]
+        [Tags("Continuous DTMF")]
+        public IActionResult StopContinuousDtmf(
+            string callConnectionId, string target,
+            bool useOptions = false, string operationContext = "StopContinuousDtmfContext")
+            => HandleContinuousDtmf(callConnectionId, target, start: false, useOptions, operationContext, async: false).Result;
+
+        #endregion
+
+        // ???????????????????????????????????????????????????????????????????????????
+        //  PRIVATE HANDLERS
+        // ???????????????????????????????????????????????????????????????????????????
+
+        private FileSource BuildFileSource() => new FileSource(new Uri(_config.CallbackUriHost + "/audio/prompt.wav"));
+
+        // ?? Play ????????????????????????????????????????????????????????????????????
+
+        private async Task<IActionResult> HandlePlay(
+            string callConnectionId, string target,
+            bool useOptions, bool interruptHoldAudio, bool loop,
+            string operationContext, bool async)
         {
-            _logger.LogInformation($"Playing file source. CallId={callConnectionId}, PlayToAll={playToAll}, Targets={(targets != null ? string.Join(',', targets.Select(t => t.RawId)) : "All")}, BargeIn={bargeIn}, Async={async}");
+            var identifier = ResolveIdentifier(target);
+            if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
+
+            _logger.LogInformation("Play. CallId={CallId}, Target={Target}, UseOptions={UseOptions}", callConnectionId, target, useOptions);
             try
             {
                 var callMedia = _service.GetCallMedia(callConnectionId);
                 var props = _service.GetCallConnectionProperties(callConnectionId);
-                var fileSource = new FileSource(new Uri(_config.CallbackUriHost + "/audio/prompt.wav"));
+                var fileSource = BuildFileSource();
+                var targets = new List<CommunicationIdentifier> { identifier };
 
-                if (playToAll)
+                Response<PlayResult> result;
+                if (useOptions)
                 {
-                    var options = new PlayToAllOptions(fileSource)
+                    // Overload: Play(PlayOptions, CancellationToken)
+                    var opts = new PlayOptions(fileSource, targets)
                     {
-                        OperationContext = "playToAllContext",
-                        InterruptCallMediaOperation = bargeIn
+                        OperationContext = operationContext,
+                        InterruptHoldAudio = interruptHoldAudio,
+                        Loop = loop
                     };
-                    var response = async ? await callMedia.PlayToAllAsync(options) : callMedia.PlayToAll(options);
-                    var status = response.GetRawResponse().ToString();
-                    _logger.LogInformation($"Played to all. Status={status}");
-                    return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = status });
+                    result = async ? await callMedia.PlayAsync(opts) : callMedia.Play(opts);
                 }
                 else
                 {
-                    if (targets == null || targets.Count == 0)
-                        return BadRequest("Target(s) required for play operation.");
-
-                    var options = new PlayOptions(fileSource, targets)
-                    {
-                        OperationContext = "playToContext",
-                        InterruptHoldAudio = bargeIn
-                    };
-                    var response = async ? await callMedia.PlayAsync(options) : callMedia.Play(options);
-                    var status = response.GetRawResponse().ToString();
-                    _logger.LogInformation($"Played to targets. Status={status}");
-                    return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = status });
+                    // Overload: Play(PlaySource, IEnumerable<CommunicationIdentifier>, CancellationToken)
+                    result = async ? await callMedia.PlayAsync(fileSource, targets) : callMedia.Play(fileSource, targets);
                 }
+
+                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = result.GetRawResponse().Status.ToString() });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error playing file source.");
-                return Problem($"Failed to play file source: {ex.Message}");
+                _logger.LogError(ex, "Error in Play");
+                return Problem($"Failed to play: {ex.Message}");
             }
         }
 
-        private async Task<IActionResult> HandleCreateCallWithMediaStreaming(
-            string target,
-            MediaStreamingAudioChannel audioChannel,
-            bool enableMediaStreaming,
-            bool enableBidirectional,
-            bool pcm24kMono,
-            bool async)
-        {
-            bool isPstn = !target.StartsWith("8:");
-            string targetType = isPstn ? "PSTN" : "ACS";
-            
-            _logger.LogInformation($"Creating call with media streaming. Target={target}, Type={targetType}, Channel={audioChannel}, EnableMedia={enableMediaStreaming}, Bidirectional={enableBidirectional}, PCM24kMono={pcm24kMono}, Async={async}");
-            try
-            {
-                var callbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks");
-                var websocketUri = _config.CallbackUriHost.Replace("https", "wss") + "/ws";
+        // ?? PlayToAll ???????????????????????????????????????????????????????????????
 
-                MediaStreamingOptions mediaOpts = new MediaStreamingOptions(
-                    new Uri(websocketUri),
-                    MediaStreamingContent.Audio,
-                    audioChannel,
-                    MediaStreamingTransport.Websocket,
-                    enableMediaStreaming)
-                {
-                    EnableBidirectional = enableBidirectional,
-                    AudioFormat = pcm24kMono ? AudioFormat.Pcm24KMono : AudioFormat.Pcm16KMono
-                };
-
-                var invite = isPstn
-                    ? new CallInvite(new PhoneNumberIdentifier(target), new PhoneNumberIdentifier(_config.AcsPhoneNumber))
-                    : new CallInvite(new CommunicationUserIdentifier(target));
-                    
-                var createOpts = new CreateCallOptions(invite, callbackUri)
-                {
-                    MediaStreamingOptions = mediaOpts
-                };
-
-                CreateCallResult result = async
-                    ? await _service.GetCallAutomationClient().CreateCallAsync(createOpts)
-                    : _service.GetCallAutomationClient().CreateCall(createOpts);
-
-                var props = result.CallConnectionProperties;
-                var status = props.CallConnectionState.ToString();
-                _logger.LogInformation($"Call created. CallConnectionId={props.CallConnectionId}, Status={status}");
-                return Ok(new { CallConnectionId = props.CallConnectionId, CorrelationId = props.CorrelationId, Status = status });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error creating call with media streaming");
-                return Problem($"Failed to create call with media streaming: {ex.Message}");
-            }
-        }
-
-        private async Task<IActionResult> HandleMediaStreaming(
+        private async Task<IActionResult> HandlePlayToAll(
             string callConnectionId,
-            bool start,
-            bool withOptions,
-            bool async)
+            bool useOptions, bool interruptCallMediaOperation, bool loop,
+            string operationContext, bool async)
         {
-            _logger.LogInformation($"{(start ? "Starting" : "Stopping")} media streaming. CallId={callConnectionId}, WithOptions={withOptions}, Async={async}");
+            _logger.LogInformation("PlayToAll. CallId={CallId}, UseOptions={UseOptions}", callConnectionId, useOptions);
             try
             {
                 var callMedia = _service.GetCallMedia(callConnectionId);
                 var props = _service.GetCallConnectionProperties(callConnectionId);
+                var fileSource = BuildFileSource();
+
+                Response<PlayResult> result;
+                if (useOptions)
+                {
+                    // Overload: PlayToAll(PlayToAllOptions, CancellationToken)
+                    var opts = new PlayToAllOptions(fileSource)
+                    {
+                        OperationContext = operationContext,
+                        InterruptCallMediaOperation = interruptCallMediaOperation,
+                        Loop = loop
+                    };
+                    result = async ? await callMedia.PlayToAllAsync(opts) : callMedia.PlayToAll(opts);
+                }
+                else
+                {
+                    // Overload: PlayToAll(PlaySource, CancellationToken)
+                    result = async ? await callMedia.PlayToAllAsync(fileSource) : callMedia.PlayToAll(fileSource);
+                }
+
+                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = result.GetRawResponse().Status.ToString() });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in PlayToAll");
+                return Problem($"Failed to play to all: {ex.Message}");
+            }
+        }
+
+        // ?? Hold ????????????????????????????????????????????????????????????????????
+
+        private async Task<IActionResult> HandleHold(
+            string callConnectionId, string target,
+            bool useOptions, bool playHoldMusic, string operationContext, bool async)
+        {
+            var identifier = ResolveIdentifier(target);
+            if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
+
+            _logger.LogInformation("Hold. CallId={CallId}, Target={Target}, UseOptions={UseOptions}, PlayMusic={PlayMusic}",
+                callConnectionId, target, useOptions, playHoldMusic);
+            try
+            {
+                var callMedia = _service.GetCallMedia(callConnectionId);
+                var props = _service.GetCallConnectionProperties(callConnectionId);
+
+                if (useOptions)
+                {
+                    // Overload: Hold(HoldOptions, CancellationToken)
+                    var opts = new HoldOptions(identifier) { OperationContext = operationContext };
+                    if (playHoldMusic) opts.PlaySource = BuildFileSource();
+                    if (async) await callMedia.HoldAsync(opts); else callMedia.Hold(opts);
+                }
+                else if (playHoldMusic)
+                {
+                    // Overload: Hold(CommunicationIdentifier, PlaySource, CancellationToken)
+                    if (async) await callMedia.HoldAsync(identifier, BuildFileSource());
+                    else callMedia.Hold(identifier, BuildFileSource());
+                }
+                else
+                {
+                    // Overload: Hold(CommunicationIdentifier, CancellationToken)
+                    if (async) await callMedia.HoldAsync(identifier); else callMedia.Hold(identifier);
+                }
+
+                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in Hold");
+                return Problem($"Failed to hold: {ex.Message}");
+            }
+        }
+
+        // ?? Unhold ??????????????????????????????????????????????????????????????????
+
+        private async Task<IActionResult> HandleUnhold(
+            string callConnectionId, string target,
+            bool useOptions, string operationContext, bool async)
+        {
+            var identifier = ResolveIdentifier(target);
+            if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
+
+            _logger.LogInformation("Unhold. CallId={CallId}, Target={Target}, UseOptions={UseOptions}", callConnectionId, target, useOptions);
+            try
+            {
+                var callMedia = _service.GetCallMedia(callConnectionId);
+                var props = _service.GetCallConnectionProperties(callConnectionId);
+
+                if (useOptions)
+                {
+                    // Overload: Unhold(UnholdOptions, CancellationToken)
+                    var opts = new UnholdOptions(identifier) { OperationContext = operationContext };
+                    if (async) await callMedia.UnholdAsync(opts); else callMedia.Unhold(opts);
+                }
+                else
+                {
+                    // Overload: Unhold(CommunicationIdentifier, CancellationToken)
+                    if (async) await callMedia.UnholdAsync(identifier); else callMedia.Unhold(identifier);
+                }
+
+                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in Unhold");
+                return Problem($"Failed to unhold: {ex.Message}");
+            }
+        }
+
+        // ?? MediaStreaming ??????????????????????????????????????????????????????????
+
+        private async Task<IActionResult> HandleMediaStreaming(
+            string callConnectionId, bool start, string operationContext, bool async)
+        {
+            _logger.LogInformation("{Action} media streaming. CallId={CallId}", start ? "Starting" : "Stopping", callConnectionId);
+            try
+            {
+                var callMedia = _service.GetCallMedia(callConnectionId);
+                var props = _service.GetCallConnectionProperties(callConnectionId);
+                var callbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks");
                 Response response;
 
                 if (start)
                 {
-                    if (withOptions)
-                    {
-                        var opts = new StartMediaStreamingOptions
-                        {
-                            OperationContext = "StartMediaStreamingContext",
-                            OperationCallbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks")
-                        };
-                        response = async ? await callMedia.StartMediaStreamingAsync(opts) : callMedia.StartMediaStreaming(opts);
-                    }
-                    else
-                    {
-                        response = async ? await callMedia.StartMediaStreamingAsync() : callMedia.StartMediaStreaming();
-                    }
+                    var opts = new StartMediaStreamingOptions { OperationContext = operationContext, OperationCallbackUri = callbackUri };
+                    response = async ? await callMedia.StartMediaStreamingAsync(opts) : callMedia.StartMediaStreaming(opts);
                 }
-                else // stop
+                else
                 {
-                    if (withOptions)
-                    {
-                        var opts = new StopMediaStreamingOptions
-                        {
-                            OperationContext = "StopMediaStreamingContext",
-                            OperationCallbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks")
-                        };
-                        response = async ? await callMedia.StopMediaStreamingAsync(opts) : callMedia.StopMediaStreaming(opts);
-                    }
-                    else
-                    {
-                        response = async ? await callMedia.StopMediaStreamingAsync() : callMedia.StopMediaStreaming();
-                    }
+                    var opts = new StopMediaStreamingOptions { OperationContext = operationContext, OperationCallbackUri = callbackUri };
+                    response = async ? await callMedia.StopMediaStreamingAsync(opts) : callMedia.StopMediaStreaming(opts);
                 }
 
-                var status = response.Status.ToString();
-                _logger.LogInformation($"Media streaming {(start ? "started" : "stopped")}. Status={status}");
-                return Ok(new { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = status });
+                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = response.Status.ToString() });
             }
             catch (Exception ex)
             {
@@ -541,22 +576,62 @@ namespace Call_Automation_GCCH.Controllers
             }
         }
 
+        // ?? CreateCallWithMediaStreaming ?????????????????????????????????????????????
+
+        private async Task<IActionResult> HandleCreateCallWithMediaStreaming(
+            string target, bool isMixed, bool enableMediaStreaming,
+            bool enableBidirectional, bool pcm24kMono, bool async)
+        {
+            if (string.IsNullOrEmpty(target)) return BadRequest("Target is required");
+            var identifier = ResolveIdentifier(target);
+            if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
+
+            bool isPstn = target.StartsWith("+");
+            var audioChannel = isMixed ? MediaStreamingAudioChannel.Mixed : MediaStreamingAudioChannel.Unmixed;
+            _logger.LogInformation("CreateCallWithMediaStreaming. Target={Target}, Channel={Channel}", target, audioChannel);
+            try
+            {
+                var callbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks");
+                var websocketUri = _config.CallbackUriHost.Replace("https", "wss") + "/ws";
+
+                var mediaOpts = new MediaStreamingOptions(
+                    new Uri(websocketUri), MediaStreamingContent.Audio, audioChannel,
+                    MediaStreamingTransport.Websocket, enableMediaStreaming)
+                {
+                    EnableBidirectional = enableBidirectional,
+                    AudioFormat = pcm24kMono ? AudioFormat.Pcm24KMono : AudioFormat.Pcm16KMono
+                };
+
+                var invite = isPstn
+                    ? new CallInvite(new PhoneNumberIdentifier(target), new PhoneNumberIdentifier(_config.AcsPhoneNumber))
+                    : new CallInvite(new CommunicationUserIdentifier(target));
+
+                var createOpts = new CreateCallOptions(invite, callbackUri) { MediaStreamingOptions = mediaOpts };
+                var result = async
+                    ? await _service.GetCallAutomationClient().CreateCallAsync(createOpts)
+                    : _service.GetCallAutomationClient().CreateCall(createOpts);
+
+                var props = result.Value.CallConnectionProperties;
+                return Ok(new CallConnectionResponse { CallConnectionId = props.CallConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating call with media streaming");
+                return Problem($"Failed to create call with media streaming: {ex.Message}");
+            }
+        }
+
+        // ?? CancelAllMediaOperations ????????????????????????????????????????????????
+
         private async Task<IActionResult> HandleCancelAllMediaOperations(string callConnectionId, bool async)
         {
-            _logger.LogInformation($"Cancelling all media operations. CallId={callConnectionId}, Async={async}");
+            _logger.LogInformation("CancelAllMediaOperations. CallId={CallId}", callConnectionId);
             try
             {
                 var props = _service.GetCallConnectionProperties(callConnectionId);
                 var callMedia = _service.GetCallMedia(callConnectionId);
-                Response<CancelAllMediaOperationsResult> result = async
-                  ? await callMedia.CancelAllMediaOperationsAsync()
-                  : callMedia.CancelAllMediaOperations();
-
-                // ← Pull status from the raw response
-                var status = result.GetRawResponse().Status.ToString();
-
-                _logger.LogInformation($"Cancelled all media operations. Status={status}");
-                return Ok(new { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = status });
+                var result = async ? await callMedia.CancelAllMediaOperationsAsync() : callMedia.CancelAllMediaOperations();
+                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = result.GetRawResponse().Status.ToString() });
             }
             catch (Exception ex)
             {
@@ -565,70 +640,50 @@ namespace Call_Automation_GCCH.Controllers
             }
         }
 
-        private enum RecognizeType { Dtmf, Choice, Speech, SpeechOrDtmf }
+        // ?? Recognize ???????????????????????????????????????????????????????????????
 
         private async Task<IActionResult> HandleRecognize(
-            string callConnectionId,
-            CommunicationIdentifier target,
-            RecognizeType type,
-            bool async)
+            string callConnectionId, string target, string recognizeType,
+            int maxTonesToCollect, bool interruptPrompt,
+            int initialSilenceTimeoutSec, int interToneTimeoutSec, int endSilenceTimeoutSec,
+            string operationContext, bool async)
         {
-            _logger.LogInformation($"Starting recognition. CallId={callConnectionId}, Type={type}, Async={async}");
+            var identifier = ResolveIdentifier(target);
+            if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
+            if (!Enum.TryParse<RecognizeType>(recognizeType, ignoreCase: true, out var type))
+                return BadRequest($"Invalid recognizeType '{recognizeType}'. Valid: Dtmf, Choice, Speech, SpeechOrDtmf");
+
+            _logger.LogInformation("Recognize. CallId={CallId}, Type={Type}", callConnectionId, type);
             try
             {
                 var callMedia = _service.GetCallMedia(callConnectionId);
                 var props = _service.GetCallConnectionProperties(callConnectionId);
-                var textSource = new TextSource("Please respond.") { VoiceName = "en-US-NancyNeural" };
-                var fileSource = new FileSource(new Uri(_config.CallbackUriHost + "/audio/prompt.wav"));
+                var fileSource = BuildFileSource();
 
                 switch (type)
                 {
                     case RecognizeType.Dtmf:
-                        var dtmfOpts = new CallMediaRecognizeDtmfOptions(target, maxTonesToCollect: 4)
-                        {
-                            Prompt = fileSource,
-                            InterruptPrompt = false,
-                            InitialSilenceTimeout = TimeSpan.FromSeconds(15),
-                            InterToneTimeout = TimeSpan.FromSeconds(5),
-                            OperationContext = "DtmfContext"
-                        };
+                        var dtmfOpts = new CallMediaRecognizeDtmfOptions(identifier, maxTonesToCollect: maxTonesToCollect)
+                        { Prompt = fileSource, InterruptPrompt = interruptPrompt, InitialSilenceTimeout = TimeSpan.FromSeconds(initialSilenceTimeoutSec), InterToneTimeout = TimeSpan.FromSeconds(interToneTimeoutSec), OperationContext = operationContext };
                         if (async) await callMedia.StartRecognizingAsync(dtmfOpts); else callMedia.StartRecognizing(dtmfOpts);
                         break;
                     case RecognizeType.Choice:
-                        var choiceOpts = new CallMediaRecognizeChoiceOptions(target, GetChoices())
-                        {
-                            Prompt = textSource,
-                            InterruptPrompt = false,
-                            InitialSilenceTimeout = TimeSpan.FromSeconds(10),
-                            OperationContext = "ChoiceContext"
-                        };
+                        var choiceOpts = new CallMediaRecognizeChoiceOptions(identifier, GetChoices())
+                        { Prompt = fileSource, InterruptPrompt = interruptPrompt, InitialSilenceTimeout = TimeSpan.FromSeconds(initialSilenceTimeoutSec), OperationContext = operationContext };
                         if (async) await callMedia.StartRecognizingAsync(choiceOpts); else callMedia.StartRecognizing(choiceOpts);
                         break;
                     case RecognizeType.Speech:
-                        var speechOpts = new CallMediaRecognizeSpeechOptions(target)
-                        {
-                            Prompt = textSource,
-                            InterruptPrompt = false,
-                            InitialSilenceTimeout = TimeSpan.FromSeconds(15),
-                            EndSilenceTimeout = TimeSpan.FromSeconds(15),
-                            OperationContext = "SpeechContext"
-                        };
+                        var speechOpts = new CallMediaRecognizeSpeechOptions(identifier)
+                        { Prompt = fileSource, InterruptPrompt = interruptPrompt, InitialSilenceTimeout = TimeSpan.FromSeconds(initialSilenceTimeoutSec), EndSilenceTimeout = TimeSpan.FromSeconds(endSilenceTimeoutSec), OperationContext = operationContext };
                         if (async) await callMedia.StartRecognizingAsync(speechOpts); else callMedia.StartRecognizing(speechOpts);
                         break;
                     case RecognizeType.SpeechOrDtmf:
-                        var bothOpts = new CallMediaRecognizeSpeechOrDtmfOptions(target, 4)
-                        {
-                            Prompt = textSource,
-                            InterruptPrompt = false,
-                            InitialSilenceTimeout = TimeSpan.FromSeconds(15),
-                            EndSilenceTimeout = TimeSpan.FromSeconds(5),
-                            OperationContext = "SpeechOrDTMFContext"
-                        };
+                        var bothOpts = new CallMediaRecognizeSpeechOrDtmfOptions(identifier, maxTonesToCollect)
+                        { Prompt = fileSource, InterruptPrompt = interruptPrompt, InitialSilenceTimeout = TimeSpan.FromSeconds(initialSilenceTimeoutSec), EndSilenceTimeout = TimeSpan.FromSeconds(endSilenceTimeoutSec), OperationContext = operationContext };
                         if (async) await callMedia.StartRecognizingAsync(bothOpts); else callMedia.StartRecognizing(bothOpts);
                         break;
                 }
 
-                _logger.LogInformation("Recognition started successfully");
                 return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
             }
             catch (Exception ex)
@@ -645,1671 +700,220 @@ namespace Call_Automation_GCCH.Controllers
                 new RecognitionChoice("no", new[] { "no", "nope" })
             };
 
-        private async Task<IActionResult> HandleHold(
-            string callConnectionId,
-            CommunicationIdentifier target,
-            bool playSource,
-            bool unhold,
-            bool async)
-        {
-            _logger.LogInformation($"{(unhold ? "Unhold" : "Hold")} participant. CallId={callConnectionId}, Target={target.RawId}, PlaySource={playSource}, Async={async}");
-            try
-            {
-                var callMedia = _service.GetCallMedia(callConnectionId);
-                var props = _service.GetCallConnectionProperties(callConnectionId);
-
-                if (unhold)
-                {
-                    var opts = new UnholdOptions(target)
-                    {
-                        OperationContext = "unholdUserContext"
-                    };
-                    if (async) await callMedia.UnholdAsync(opts); else callMedia.Unhold(opts);
-                }
-                else
-                {
-                    var opts = new HoldOptions(target)
-                    {
-                        OperationContext = "holdUserContext"
-                    };
-                    if (playSource)
-                        opts.PlaySource = new FileSource(new Uri(_config.CallbackUriHost + "/audio/prompt.wav"));
-                    if (async) await callMedia.HoldAsync(opts); else callMedia.Hold(opts);
-                }
-
-                _logger.LogInformation("Hold/Unhold operation completed");
-                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during hold/unhold");
-                return Problem($"Failed to {(unhold ? "unhold" : "hold")}: {ex.Message}");
-            }
-        }
+        // ?? InterruptAudioAndAnnounce ???????????????????????????????????????????????
 
         private async Task<IActionResult> HandleInterruptAudioAndAnnounce(
-            string callConnectionId,
-            CommunicationIdentifier target,
-            bool async)
+            string callConnectionId, string target, string operationContext, bool async)
         {
-            _logger.LogInformation($"Interrupt audio and announce. CallId={callConnectionId}, Target={target.RawId}, Async={async}");
+            var identifier = ResolveIdentifier(target);
+            if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
+
+            _logger.LogInformation("InterruptAudioAndAnnounce. CallId={CallId}, Target={Target}", callConnectionId, target);
             try
             {
                 var callMedia = _service.GetCallMedia(callConnectionId);
                 var props = _service.GetCallConnectionProperties(callConnectionId);
-                var fileSource = new FileSource(new Uri(_config.CallbackUriHost + "/audio/prompt.wav"));
-                var opts = new InterruptAudioAndAnnounceOptions(fileSource, target)
-                {
-                    OperationContext = "interruptContext"
-                };
-
+                var opts = new InterruptAudioAndAnnounceOptions(BuildFileSource(), identifier) { OperationContext = operationContext };
                 if (async) await callMedia.InterruptAudioAndAnnounceAsync(opts); else callMedia.InterruptAudioAndAnnounce(opts);
-
-                _logger.LogInformation("Interrupt audio and announce completed");
                 return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during interrupt audio and announce");
+                _logger.LogError(ex, "Error in InterruptAudioAndAnnounce");
                 return Problem($"Failed to interrupt audio and announce: {ex.Message}");
             }
         }
+
+        // ?? Transcription ???????????????????????????????????????????????????????????
+
+        private enum TranscriptionAction { Start, Stop }
+
+        private async Task<IActionResult> HandleTranscription(
+            string callConnectionId, TranscriptionAction action, string? locale, string operationContext, bool async)
+        {
+            _logger.LogInformation("{Action} transcription. CallId={CallId}, Locale={Locale}", action, callConnectionId, locale);
+            try
+            {
+                var callMedia = _service.GetCallMedia(callConnectionId);
+                var props = _service.GetCallConnectionProperties(callConnectionId);
+
+                if (action == TranscriptionAction.Start)
+                {
+                    var opts = new StartTranscriptionOptions { Locale = locale ?? "en-US", OperationContext = operationContext };
+                    if (async) await callMedia.StartTranscriptionAsync(opts); else callMedia.StartTranscription(opts);
+                }
+                else
+                {
+                    var opts = new StopTranscriptionOptions { OperationContext = operationContext };
+                    if (async) await callMedia.StopTranscriptionAsync(opts); else callMedia.StopTranscription(opts);
+                }
+
+                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during transcription {Action}", action);
+                return Problem($"Failed to {action.ToString().ToLower()} transcription: {ex.Message}");
+            }
+        }
+
+        private async Task<IActionResult> HandleUpdateTranscription(
+            string callConnectionId, string locale, bool useOptions, string operationContext, bool async)
+        {
+            _logger.LogInformation("UpdateTranscription. CallId={CallId}, Locale={Locale}, UseOptions={UseOptions}", callConnectionId, locale, useOptions);
+            try
+            {
+                var callMedia = _service.GetCallMedia(callConnectionId);
+                var props = _service.GetCallConnectionProperties(callConnectionId);
+
+                if (useOptions)
+                {
+                    // Overload: UpdateTranscription(UpdateTranscriptionOptions, CancellationToken)
+                    var opts = new UpdateTranscriptionOptions(locale) { OperationContext = operationContext };
+                    if (async) await callMedia.UpdateTranscriptionAsync(opts); else callMedia.UpdateTranscription(opts);
+                }
+                else
+                {
+                    // Overload: UpdateTranscription(string locale, CancellationToken)
+                    if (async) await callMedia.UpdateTranscriptionAsync(locale); else callMedia.UpdateTranscription(locale);
+                }
+
+                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating transcription");
+                return Problem($"Failed to update transcription: {ex.Message}");
+            }
+        }
+
+        // ?? SendDtmfTones ???????????????????????????????????????????????????????????
+
+        private async Task<IActionResult> HandleSendDtmfTones(
+            string callConnectionId, string target, string tones,
+            bool useOptions, string operationContext, bool async)
+        {
+            if (string.IsNullOrEmpty(callConnectionId)) return BadRequest("callConnectionId is required");
+            var parsedTones = ParseTones(tones);
+            if (parsedTones == null || parsedTones.Count == 0)
+                return BadRequest("At least one valid tone is required. Valid: zero-nine, pound, asterisk (or 0-9, #, *)");
+            var identifier = ResolveIdentifier(target);
+            if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
+
+            _logger.LogInformation("SendDtmfTones [{Tones}]. CallId={CallId}, UseOptions={UseOptions}", string.Join(",", parsedTones), callConnectionId, useOptions);
+            try
+            {
+                var callMedia = _service.GetCallMedia(callConnectionId);
+
+                if (useOptions)
+                {
+                    // Overload: SendDtmfTones(SendDtmfTonesOptions, CancellationToken)
+                    var opts = new SendDtmfTonesOptions(parsedTones, identifier)
+                    { OperationContext = operationContext, OperationCallbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks") };
+                    if (async) await callMedia.SendDtmfTonesAsync(opts); else callMedia.SendDtmfTones(opts);
+                }
+                else
+                {
+                    // Overload: SendDtmfTones(IEnumerable<DtmfTone>, CommunicationIdentifier, CancellationToken)
+                    if (async) await callMedia.SendDtmfTonesAsync(parsedTones, identifier);
+                    else callMedia.SendDtmfTones(parsedTones, identifier);
+                }
+
+                var props = _service.GetCallConnectionProperties(callConnectionId);
+                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending DTMF tones");
+                return Problem($"Failed to send DTMF tones: {ex.Message}");
+            }
+        }
+
+        // ?? ContinuousDtmf ?????????????????????????????????????????????????????????
+
+        private async Task<IActionResult> HandleContinuousDtmf(
+            string callConnectionId, string target, bool start,
+            bool useOptions, string operationContext, bool async)
+        {
+            if (string.IsNullOrEmpty(callConnectionId)) return BadRequest("callConnectionId is required");
+            var identifier = ResolveIdentifier(target);
+            if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
+
+            var action = start ? "Starting" : "Stopping";
+            _logger.LogInformation("{Action} continuous DTMF. CallId={CallId}, UseOptions={UseOptions}", action, callConnectionId, useOptions);
+            try
+            {
+                var callMedia = _service.GetCallMedia(callConnectionId);
+
+                if (start)
+                {
+                    if (useOptions)
+                    {
+                        // Overload: StartContinuousDtmfRecognition(ContinuousDtmfRecognitionOptions, CancellationToken)
+                        var opts = new ContinuousDtmfRecognitionOptions(identifier) { OperationContext = operationContext };
+                        if (async) await callMedia.StartContinuousDtmfRecognitionAsync(opts); else callMedia.StartContinuousDtmfRecognition(opts);
+                    }
+                    else
+                    {
+                        // Overload: StartContinuousDtmfRecognition(CommunicationIdentifier, CancellationToken)
+                        if (async) await callMedia.StartContinuousDtmfRecognitionAsync(identifier);
+                        else callMedia.StartContinuousDtmfRecognition(identifier);
+                    }
+                }
+                else
+                {
+                    if (useOptions)
+                    {
+                        var opts = new ContinuousDtmfRecognitionOptions(identifier) { OperationContext = operationContext };
+                        if (async) await callMedia.StopContinuousDtmfRecognitionAsync(opts); else callMedia.StopContinuousDtmfRecognition(opts);
+                    }
+                    else
+                    {
+                        if (async) await callMedia.StopContinuousDtmfRecognitionAsync(identifier);
+                        else callMedia.StopContinuousDtmfRecognition(identifier);
+                    }
+                }
+
+                var props = _service.GetCallConnectionProperties(callConnectionId);
+                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error {Action} continuous DTMF", action.ToLower());
+                return Problem($"Failed to {action.ToLower()} continuous DTMF: {ex.Message}");
+            }
+        }
+
+        // ???????????????????????????????????????????????????????????????????????????
+        //  SHARED HELPERS
+        // ???????????????????????????????????????????????????????????????????????????
+
+        private enum RecognizeType { Dtmf, Choice, Speech, SpeechOrDtmf }
+
+        private static CommunicationIdentifier? ResolveIdentifier(string? target)
+        {
+            if (string.IsNullOrEmpty(target)) return null;
+            if (target.StartsWith("8:")) return new CommunicationUserIdentifier(target);
+            if (target.StartsWith("+")) return new PhoneNumberIdentifier(target);
+            return null;
+        }
+
+        private static List<DtmfTone>? ParseTones(string? tones)
+        {
+            if (string.IsNullOrWhiteSpace(tones)) return null;
+            var map = new Dictionary<string, DtmfTone>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["zero"] = DtmfTone.Zero, ["one"] = DtmfTone.One, ["two"] = DtmfTone.Two,
+                ["three"] = DtmfTone.Three, ["four"] = DtmfTone.Four, ["five"] = DtmfTone.Five,
+                ["six"] = DtmfTone.Six, ["seven"] = DtmfTone.Seven, ["eight"] = DtmfTone.Eight,
+                ["nine"] = DtmfTone.Nine, ["pound"] = DtmfTone.Pound, ["asterisk"] = DtmfTone.Asterisk,
+                ["0"] = DtmfTone.Zero, ["1"] = DtmfTone.One, ["2"] = DtmfTone.Two,
+                ["3"] = DtmfTone.Three, ["4"] = DtmfTone.Four, ["5"] = DtmfTone.Five,
+                ["6"] = DtmfTone.Six, ["7"] = DtmfTone.Seven, ["8"] = DtmfTone.Eight,
+                ["9"] = DtmfTone.Nine, ["#"] = DtmfTone.Pound, ["*"] = DtmfTone.Asterisk
+            };
+            return tones.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Where(t => map.ContainsKey(t)).Select(t => map[t]).ToList();
+        }
     }
 }
-
-#region Play Media with File Source
-
-
-
-//app.MapPost("/playFileSourceToPstnTargetAsync", async (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-//{
-//    try
-//    {
-//        CallMedia callMedia = GetCallMedia(callConnectionId);
-//        //  FileSource fileSource = new FileSource(new Uri(fileSourceUri));
-//        List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new PhoneNumberIdentifier(pstnTarget) };
-//        PlayOptions playToOptions = new PlayOptions(fileSource, playTo)
-//        {
-//            OperationContext = "playToContext"
-//        };
-
-//        logger.LogInformation($"Playing file source to PSTN target. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-//        await callMedia.PlayAsync(playToOptions);
-
-//        string successMessage = $"File source played successfully to PSTN target. CallConnectionId: {callConnectionId}";
-//        LogCollector.Log(successMessage);
-//        logger.LogInformation(successMessage);
-
-//        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-//    }
-//    catch (Exception ex)
-//    {
-//        string errorMessage = $"Error playing file source to PSTN target. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-//        LogCollector.Log(errorMessage);
-//        logger.LogInformation(errorMessage);
-
-//        return Results.Problem($"Failed to play file source: {ex.Message}");
-//    }
-//}).WithTags("Play FileSource Media APIs");
-
-//app.MapPost("/playFileSourceToPstnTarget", (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-//{
-//    try
-//    {
-//        CallMedia callMedia = GetCallMedia(callConnectionId);
-//        //  FileSource fileSource = new FileSource(new Uri(fileSourceUri));
-//        List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new PhoneNumberIdentifier(pstnTarget) };
-//        PlayOptions playToOptions = new PlayOptions(fileSource, playTo)
-//        {
-//            OperationContext = "playToContext"
-//        };
-
-//        logger.LogInformation($"Playing file source to PSTN target. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-//        callMedia.Play(playToOptions);
-
-//        string successMessage = $"File source played successfully to PSTN target. CallConnectionId: {callConnectionId}";
-//        LogCollector.Log(successMessage);
-//        logger.LogInformation(successMessage);
-
-//        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-//    }
-//    catch (Exception ex)
-//    {
-//        string errorMessage = $"Error playing file source to PSTN target. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-//        LogCollector.Log(errorMessage);
-//        logger.LogInformation(errorMessage);
-
-//        return Results.Problem($"Failed to play file source: {ex.Message}");
-//    }
-//}).WithTags("Play FileSource Media APIs");
-
-
-//app.MapPost("/playFileSourceToTeamsTargetAsync", async (string callConnectionId, string teamsObjectId, ILogger<Program> logger) =>
-//{
-//    try
-//    {
-//        CallMedia callMedia = GetCallMedia(callConnectionId);
-//        // FileSource fileSource = new FileSource(new Uri(fileSourceUri));
-//        List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new MicrosoftTeamsUserIdentifier(teamsObjectId) };
-//        PlayOptions playToOptions = new PlayOptions(fileSource, playTo)
-//        {
-//            OperationContext = "playToContext"
-//        };
-
-//        logger.LogInformation($"Playing file source to Teams target. CallConnectionId: {callConnectionId}, Target: {teamsObjectId}");
-//        await callMedia.PlayAsync(playToOptions);
-
-//        string successMessage = $"File source played successfully to Teams target. CallConnectionId: {callConnectionId}";
-//        LogCollector.Log(successMessage);
-//        logger.LogInformation(successMessage);
-
-//        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-//    }
-//    catch (Exception ex)
-//    {
-//        string errorMessage = $"Error playing file source to Teams target. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-//        LogCollector.Log(errorMessage);
-//        logger.LogInformation(errorMessage);
-
-//        return Results.Problem($"Failed to play file source: {ex.Message}");
-//    }
-//}).WithTags("Play FileSource Media APIs");
-
-//app.MapPost("/playFileSourceToTeamsTarget", (string callConnectionId, string teamsObjectId, ILogger<Program> logger) =>
-//{
-//    try
-//    {
-//        CallMedia callMedia = GetCallMedia(callConnectionId);
-//        //  FileSource fileSource = new FileSource(new Uri(fileSourceUri));
-//        List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new MicrosoftTeamsUserIdentifier(teamsObjectId) };
-//        PlayOptions playToOptions = new PlayOptions(fileSource, playTo)
-//        {
-//            OperationContext = "playToContext"
-//        };
-
-//        logger.LogInformation($"Playing file source to Teams target. CallConnectionId: {callConnectionId}, Target: {teamsObjectId}");
-//        callMedia.Play(playToOptions);
-
-//        string successMessage = $"File source played successfully to Teams target. CallConnectionId: {callConnectionId}";
-//        LogCollector.Log(successMessage);
-//        logger.LogInformation(successMessage);
-
-//        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-//    }
-//    catch (Exception ex)
-//    {
-//        string errorMessage = $"Error playing file source to Teams target. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-//        LogCollector.Log(errorMessage);
-//        logger.LogInformation(errorMessage);
-
-//        return Results.Problem($"Failed to play file source: {ex.Message}");
-//    }
-//}).WithTags("Play FileSource Media APIs");
-
-#endregion
-#region Recognization
-/*
-app.MapPost("/recognizeDTMFAsync", async (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-        TextSource textSource = new TextSource("Hi, this is recognize test. please provide input thanks!.")
-        {
-            VoiceName = "en-US-NancyNeural"
-        };
-
-        var target = new PhoneNumberIdentifier(pstnTarget);
-
-        var recognizeOptions =
-                new CallMediaRecognizeDtmfOptions(
-                    targetParticipant: target, maxTonesToCollect: 4)
-                {
-                    InterruptPrompt = false,
-                    InterToneTimeout = TimeSpan.FromSeconds(5),
-                    OperationContext = "DtmfContext",
-                    InitialSilenceTimeout = TimeSpan.FromSeconds(15),
-                    Prompt = textSource
-                };
-
-        logger.LogInformation($"Starting DTMF recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        await callMedia.StartRecognizingAsync(recognizeOptions);
-        
-        string successMessage = $"DTMF recognition started successfully. CallConnectionId: {callConnectionId}";
-        LogCollector.Log(successMessage);
-        logger.LogInformation(successMessage);
-        
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error starting DTMF recognition. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        LogCollector.Log(errorMessage);
-        logger.LogInformation(errorMessage);
-        
-        return Results.Problem($"Failed to start DTMF recognition: {ex.Message}");
-    }
-}).WithTags("Start Recognization APIs");
-
-app.MapPost("/recognizeDTMF", (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-        TextSource textSource = new TextSource("Hi, this is recognize test. please provide input thanks!.")
-        {
-            VoiceName = "en-US-NancyNeural"
-        };
-
-        var target = new PhoneNumberIdentifier(pstnTarget);
-
-        var recognizeOptions =
-                new CallMediaRecognizeDtmfOptions(
-                    targetParticipant: target, maxTonesToCollect: 4)
-                {
-                    InterruptPrompt = false,
-                    InterToneTimeout = TimeSpan.FromSeconds(5),
-                    OperationContext = "DtmfContext",
-                    InitialSilenceTimeout = TimeSpan.FromSeconds(15),
-                    Prompt = textSource
-                };
-
-        logger.LogInformation($"Starting DTMF recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        callMedia.StartRecognizing(recognizeOptions);
-        
-        string successMessage = $"DTMF recognition started successfully. CallConnectionId: {callConnectionId}";
-        LogCollector.Log(successMessage);
-        logger.LogInformation(successMessage);
-        
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error starting DTMF recognition. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        LogCollector.Log(errorMessage);
-        logger.LogInformation(errorMessage);
-        
-        return Results.Problem($"Failed to start DTMF recognition: {ex.Message}");
-    }
-}).WithTags("Start Recognization APIs");
-
-
-app.MapPost("/recognizeChoiceAsync", async (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-        TextSource textSource = new TextSource("Hi, this is recognize test. please provide input thanks!.")
-        {
-            VoiceName = "en-US-NancyNeural"
-        };
-
-        var target = new PhoneNumberIdentifier(pstnTarget);
-
-
-        var recognizeOptions =
-            new CallMediaRecognizeChoiceOptions(targetParticipant: target, GetChoices())
-            {
-                InterruptCallMediaOperation = false,
-                InterruptPrompt = false,
-                InitialSilenceTimeout = TimeSpan.FromSeconds(10),
-                Prompt = textSource,
-                OperationContext = "ChoiceContext"
-            };
-
-        logger.LogInformation($"Starting choice recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        await callMedia.StartRecognizingAsync(recognizeOptions);
-        
-        string successMessage = $"Choice recognition started successfully. CallConnectionId: {callConnectionId}";
-        LogCollector.Log(successMessage);
-        logger.LogInformation(successMessage);
-        
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error starting choice recognition. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        LogCollector.Log(errorMessage);
-        logger.LogInformation(errorMessage);
-        
-        return Results.Problem($"Failed to start choice recognition: {ex.Message}");
-    }
-}).WithTags("Start Recognization APIs");
-
-app.MapPost("/recognizeChoice", (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-        TextSource textSource = new TextSource("Hi, this is recognize test. please provide input thanks!.")
-        {
-            VoiceName = "en-US-NancyNeural"
-        };
-
-        var target = new PhoneNumberIdentifier(pstnTarget);
-
-
-        var recognizeOptions =
-            new CallMediaRecognizeChoiceOptions(targetParticipant: target, GetChoices())
-            {
-                InterruptCallMediaOperation = false,
-                InterruptPrompt = false,
-                InitialSilenceTimeout = TimeSpan.FromSeconds(10),
-                Prompt = textSource,
-                OperationContext = "ChoiceContext"
-            };
-
-        logger.LogInformation($"Starting choice recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        callMedia.StartRecognizingAsync(recognizeOptions);
-        
-        string successMessage = $"Choice recognition started successfully. CallConnectionId: {callConnectionId}";
-        LogCollector.Log(successMessage);
-        logger.LogInformation(successMessage);
-        
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error starting choice recognition. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        LogCollector.Log(errorMessage);
-        logger.LogInformation(errorMessage);
-        
-        return Results.Problem($"Failed to start choice recognition: {ex.Message}");
-    }
-}).WithTags("Start Recognization APIs");
-
-app.MapPost("/recognizeSpeechAsync", async (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-        TextSource textSource = new TextSource("Hi, this is recognize test. please provide input thanks!.")
-        {
-            VoiceName = "en-US-NancyNeural"
-        };
-
-        var target = new PhoneNumberIdentifier(pstnTarget);
-
-        var recognizeOptions = new CallMediaRecognizeSpeechOptions(targetParticipant: target)
-        {
-            InterruptPrompt = false,
-            OperationContext = "SpeechContext",
-            InitialSilenceTimeout = TimeSpan.FromSeconds(15),
-            Prompt = textSource,
-            EndSilenceTimeout = TimeSpan.FromSeconds(15)
-        };
-
-        logger.LogInformation($"Starting speech recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        await callMedia.StartRecognizingAsync(recognizeOptions);
-        
-        string successMessage = $"Speech recognition started successfully. CallConnectionId: {callConnectionId}";
-        LogCollector.Log(successMessage);
-        logger.LogInformation(successMessage);
-        
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error starting speech recognition. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        LogCollector.Log(errorMessage);
-        logger.LogInformation(errorMessage);
-        
-        return Results.Problem($"Failed to start speech recognition: {ex.Message}");
-    }
-}).WithTags("Start Recognization APIs");
-
-app.MapPost("/recognizeSpeech", (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-        TextSource textSource = new TextSource("Hi, this is recognize test. please provide input thanks!.")
-        {
-            VoiceName = "en-US-NancyNeural"
-        };
-
-        var target = new PhoneNumberIdentifier(pstnTarget);
-
-        var recognizeOptions = new CallMediaRecognizeSpeechOptions(targetParticipant: target)
-        {
-            InterruptPrompt = false,
-            OperationContext = "SpeechContext",
-            InitialSilenceTimeout = TimeSpan.FromSeconds(15),
-            Prompt = textSource,
-            EndSilenceTimeout = TimeSpan.FromSeconds(15)
-        };
-
-        logger.LogInformation($"Starting speech recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        callMedia.StartRecognizing(recognizeOptions);
-        
-        string successMessage = $"Speech recognition started successfully. CallConnectionId: {callConnectionId}";
-        LogCollector.Log(successMessage);
-        logger.LogInformation(successMessage);
-        
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error starting speech recognition. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        LogCollector.Log(errorMessage);
-        logger.LogInformation(errorMessage);
-        
-        return Results.Problem($"Failed to start speech recognition: {ex.Message}");
-    }
-}).WithTags("Start Recognization APIs");
-
-app.MapPost("/recognizeSpeechOrDtmfAsync", async (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-        TextSource textSource = new TextSource("Hi, this is recognize test. please provide input thanks!.")
-        {
-            VoiceName = "en-US-NancyNeural"
-        };
-
-        var target = new PhoneNumberIdentifier(pstnTarget);
-
-        var recognizeOptions =
-                   new CallMediaRecognizeSpeechOrDtmfOptions(
-                       targetParticipant: target, maxTonesToCollect: 4)
-                   {
-                       InterruptPrompt = false,
-                       OperationContext = "SpeechOrDTMFContext",
-                       InitialSilenceTimeout = TimeSpan.FromSeconds(15),
-                       Prompt = textSource,
-                       EndSilenceTimeout = TimeSpan.FromSeconds(5)
-                   };
-                   
-        logger.LogInformation($"Starting speech/DTMF recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        await callMedia.StartRecognizingAsync(recognizeOptions);
-        
-        string successMessage = $"Speech/DTMF recognition started successfully. CallConnectionId: {callConnectionId}";
-        LogCollector.Log(successMessage);
-        logger.LogInformation(successMessage);
-        
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error starting speech/DTMF recognition. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        LogCollector.Log(errorMessage);
-        logger.LogInformation(errorMessage);
-        
-        return Results.Problem($"Failed to start speech/DTMF recognition: {ex.Message}");
-    }
-}).WithTags("Start Recognization APIs");
-
-app.MapPost("/recognizeSpeechOrDtmf", (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-        TextSource textSource = new TextSource("Hi, this is recognize test. please provide input thanks!.")
-        {
-            VoiceName = "en-US-NancyNeural"
-        };
-
-        var target = new PhoneNumberIdentifier(pstnTarget);
-
-        var recognizeOptions =
-                   new CallMediaRecognizeSpeechOrDtmfOptions(
-                       targetParticipant: target, maxTonesToCollect: 4)
-                   {
-                       InterruptPrompt = false,
-                       OperationContext = "SpeechOrDTMFContext",
-                       InitialSilenceTimeout = TimeSpan.FromSeconds(15),
-                       Prompt = textSource,
-                       EndSilenceTimeout = TimeSpan.FromSeconds(5)
-                   };
-                   
-        logger.LogInformation($"Starting speech/DTMF recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        callMedia.StartRecognizingAsync(recognizeOptions);
-        
-        string successMessage = $"Speech/DTMF recognition started successfully. CallConnectionId: {callConnectionId}";
-        LogCollector.Log(successMessage);
-        logger.LogInformation(successMessage);
-        
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error starting speech/DTMF recognition. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        LogCollector.Log(errorMessage);
-        logger.LogInformation(errorMessage);
-        
-        return Results.Problem($"Failed to start speech/DTMF recognition: {ex.Message}");
-    }
-}).WithTags("Start Recognization APIs");
-
-*/
-#endregion
-#region DTMF
-/*
-app.MapPost("/sendDTMFTonesAsync", async (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        CommunicationIdentifier target = new PhoneNumberIdentifier(pstnTarget);
-
-        List<DtmfTone> tones = new List<DtmfTone>
-            {
-                DtmfTone.Zero,
-                DtmfTone.One
-            };
-
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-
-        logger.LogInformation($"Sending DTMF tones. CallConnectionId: {callConnectionId}, Target: {pstnTarget}, Tones: 0,1");
-        await callMedia.SendDtmfTonesAsync(tones, target);
-        
-        string successMessage = $"DTMF tones sent successfully. CallConnectionId: {callConnectionId}";
-        LogCollector.Log(successMessage);
-        logger.LogInformation(successMessage);
-        
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error sending DTMF tones. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        LogCollector.Log(errorMessage);
-        logger.LogInformation(errorMessage);
-        
-        return Results.Problem($"Failed to send DTMF tones: {ex.Message}");
-    }
-}).WithTags("Send or Start DTMF APIs");
-
-app.MapPost("/sendDTMFTones", (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        CommunicationIdentifier target = new PhoneNumberIdentifier(pstnTarget);
-
-        List<DtmfTone> tones = new List<DtmfTone>
-            {
-                DtmfTone.Zero,
-                DtmfTone.One
-            };
-
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-
-        logger.LogInformation($"Sending DTMF tones. CallConnectionId: {callConnectionId}, Target: {pstnTarget}, Tones: 0,1");
-        callMedia.SendDtmfTones(tones, target);
-        
-        string successMessage = $"DTMF tones sent successfully. CallConnectionId: {callConnectionId}";
-        LogCollector.Log(successMessage);
-        logger.LogInformation(successMessage);
-        
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error sending DTMF tones. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        LogCollector.Log(errorMessage);
-        logger.LogInformation(errorMessage);
-        
-        return Results.Problem($"Failed to send DTMF tones: {ex.Message}");
-    }
-}).WithTags("Send or Start DTMF APIs");
-
-app.MapPost("/startContinuousDTMFTonesAsync", async (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        logger.LogInformation($"Starting continuous DTMF recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        LogCollector.Log($"Starting continuous DTMF recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        
-        CommunicationIdentifier target = new PhoneNumberIdentifier(pstnTarget);
-
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-
-        logger.LogInformation($"Executing StartContinuousDtmfRecognitionAsync. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        LogCollector.Log($"Executing StartContinuousDtmfRecognitionAsync. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        
-        await callMedia.StartContinuousDtmfRecognitionAsync(target);
-        
-        string successMessage = $"Continuous DTMF recognition started successfully. CallConnectionId: {callConnectionId}";
-        logger.LogInformation(successMessage);
-        LogCollector.Log(successMessage);
-        
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error starting continuous DTMF recognition. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        logger.LogInformation(errorMessage);
-        LogCollector.Log(errorMessage);
-        
-        return Results.Problem($"Failed to start continuous DTMF recognition: {ex.Message}");
-    }
-}).WithTags("Send or Start DTMF APIs");
-
-app.MapPost("/startContinuousDTMFTones", (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        logger.LogInformation($"Starting continuous DTMF recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        LogCollector.Log($"Starting continuous DTMF recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        
-        CommunicationIdentifier target = new PhoneNumberIdentifier(pstnTarget);
-
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-
-        logger.LogInformation($"Executing StartContinuousDtmfRecognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        LogCollector.Log($"Executing StartContinuousDtmfRecognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        
-        callMedia.StartContinuousDtmfRecognition(target);
-        
-        string successMessage = $"Continuous DTMF recognition started successfully. CallConnectionId: {callConnectionId}";
-        logger.LogInformation(successMessage);
-        LogCollector.Log(successMessage);
-        
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error starting continuous DTMF recognition. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        logger.LogInformation(errorMessage);
-        LogCollector.Log(errorMessage);
-        
-        return Results.Problem($"Failed to start continuous DTMF recognition: {ex.Message}");
-    }
-}).WithTags("Send or Start DTMF APIs");
-
-app.MapPost("/stopContinuousDTMFTonesAsync", async (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        logger.LogInformation($"Stopping continuous DTMF recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        LogCollector.Log($"Stopping continuous DTMF recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        
-        CommunicationIdentifier target = new PhoneNumberIdentifier(pstnTarget);
-
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-
-        logger.LogInformation($"Executing StopContinuousDtmfRecognitionAsync. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        LogCollector.Log($"Executing StopContinuousDtmfRecognitionAsync. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        
-        await callMedia.StopContinuousDtmfRecognitionAsync(target);
-        
-        string successMessage = $"Continuous DTMF recognition stopped successfully. CallConnectionId: {callConnectionId}";
-        logger.LogInformation(successMessage);
-        LogCollector.Log(successMessage);
-        
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error stopping continuous DTMF recognition. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        logger.LogInformation(errorMessage);
-        LogCollector.Log(errorMessage);
-        
-        return Results.Problem($"Failed to stop continuous DTMF recognition: {ex.Message}");
-    }
-}).WithTags("Send or Start DTMF APIs");
-
-app.MapPost("/stopContinuousDTMFTones", (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        logger.LogInformation($"Stopping continuous DTMF recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        LogCollector.Log($"Stopping continuous DTMF recognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        
-        CommunicationIdentifier target = new PhoneNumberIdentifier(pstnTarget);
-
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-
-        logger.LogInformation($"Executing StopContinuousDtmfRecognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        LogCollector.Log($"Executing StopContinuousDtmfRecognition. CallConnectionId: {callConnectionId}, Target: {pstnTarget}");
-        
-        callMedia.StopContinuousDtmfRecognition(target);
-        
-        string successMessage = $"Continuous DTMF recognition stopped successfully. CallConnectionId: {callConnectionId}";
-        logger.LogInformation(successMessage);
-        LogCollector.Log(successMessage);
-        
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error stopping continuous DTMF recognition. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        logger.LogInformation(errorMessage);
-        LogCollector.Log(errorMessage);
-        
-        return Results.Problem($"Failed to stop continuous DTMF recognition: {ex.Message}");
-    }
-}).WithTags("Send or Start DTMF APIs");
-*/
-#endregion
-#region Hold/Unhold
-/*
-app.MapPost("/holdParticipantAsync", async (string callConnectionId, string pstnTarget, bool isPlaySource, ILogger<Program> logger) =>
-{
-    try
-    {
-        CommunicationIdentifier target = new PhoneNumberIdentifier(pstnTarget);
-
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-        TextSource textSource = new TextSource("You are on hold please wait..")
-        {
-            VoiceName = "en-US-NancyNeural"
-        };
-
-        if (isPlaySource)
-        {
-            HoldOptions holdOptions = new HoldOptions(target)
-            {
-                PlaySource = textSource,
-                OperationContext = "holdUserContext"
-            };
-            await callMedia.HoldAsync(holdOptions);
-        }
-        else
-        {
-            HoldOptions holdOptions = new HoldOptions(target)
-            {
-                OperationContext = "holdUserContext"
-            };
-            await callMedia.HoldAsync(holdOptions);
-        }
-        string successMessage = $"Participant put on hold successfully. CallConnectionId: {callConnectionId}";
-        logger.LogInformation(successMessage);
-        LogCollector.Log(successMessage);
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error putting participant on hold. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        logger.LogInformation(errorMessage);
-        LogCollector.Log(errorMessage);
-        return Results.Problem($"Failed to put participant on hold: {ex.Message}");
-    }
-}).WithTags("Hold Participant APIs");
-
-app.MapPost("/holdParticipant", (string callConnectionId, string pstnTarget, bool isPlaySource, ILogger<Program> logger) =>
-{
-    try
-    {
-        CommunicationIdentifier target = new PhoneNumberIdentifier(pstnTarget);
-
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-        TextSource textSource = new TextSource("You are on hold please wait..")
-        {
-            VoiceName = "en-US-NancyNeural"
-        };
-
-        if (isPlaySource)
-        {
-            HoldOptions holdOptions = new HoldOptions(target)
-            {
-                PlaySource = textSource,
-                OperationContext = "holdUserContext"
-            };
-            callMedia.Hold(holdOptions);
-        }
-        else
-        {
-            HoldOptions holdOptions = new HoldOptions(target)
-            {
-                OperationContext = "holdUserContext"
-            };
-            callMedia.Hold(holdOptions);
-        }
-        string successMessage = $"Participant put on hold successfully. CallConnectionId: {callConnectionId}";
-        logger.LogInformation(successMessage);
-        LogCollector.Log(successMessage);
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error putting participant on hold. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        logger.LogInformation(errorMessage);
-        LogCollector.Log(errorMessage);
-        return Results.Problem($"Failed to put participant on hold: {ex.Message}");
-    }
-}).WithTags("Hold Participant APIs");
-
-app.MapPost("/interrupAudioAndAnnounceAsync", async (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        CommunicationIdentifier target = new PhoneNumberIdentifier(pstnTarget);
-
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-
-        TextSource textSource = new TextSource("Hi, This is interrup audio and announcement test")
-        {
-            VoiceName = "en-US-NancyNeural"
-        };
-
-        InterruptAudioAndAnnounceOptions interruptAudio = new InterruptAudioAndAnnounceOptions(textSource, target)
-        {
-            OperationContext = "innterruptContext"
-        };
-
-        await callMedia.InterruptAudioAndAnnounceAsync(interruptAudio);
-        string successMessage = $"Audio interrupted and announcement made successfully. CallConnectionId: {callConnectionId}";
-        logger.LogInformation(successMessage);
-        LogCollector.Log(successMessage);
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error interrupting audio and announcing. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        logger.LogInformation(errorMessage);
-        LogCollector.Log(errorMessage);
-        return Results.Problem($"Failed to interrupt audio and announce: {ex.Message}");
-    }
-}).WithTags("Hold Participant APIs");
-
-app.MapPost("/interrupAudioAndAnnounce", (string callConnectionId, string pstnTarget, ILogger <Program> logger) =>
-{
-    try
-    {
-        CommunicationIdentifier target = new PhoneNumberIdentifier(pstnTarget);
-
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-
-        TextSource textSource = new TextSource("Hi, This is interrupt audio and announcement test.")
-        {
-            VoiceName = "en-US-NancyNeural"
-        };
-
-        InterruptAudioAndAnnounceOptions interruptAudio = new InterruptAudioAndAnnounceOptions(textSource, target)
-        {
-            OperationContext = "innterruptContext"
-        };
-
-        callMedia.InterruptAudioAndAnnounce(interruptAudio);
-        string successMessage = $"Audio interrupted and announcement made successfully. CallConnectionId: {callConnectionId}";
-        logger.LogInformation(successMessage);
-        LogCollector.Log(successMessage);
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error interrupting audio and announcing. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        logger.LogInformation(errorMessage);
-        LogCollector.Log(errorMessage);
-        return Results.Problem($"Failed to interrupt audio and announce: {ex.Message}");
-    }
-}).WithTags("Hold Participant APIs");
-
-
-app.MapPost("/unholdParticipantAsync", async (string callConnectionId, string pstnTarget, ILogger<Program> logger) =>
-{
-    try
-    {
-        CommunicationIdentifier target = new PhoneNumberIdentifier(pstnTarget);
-
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-
-        UnholdOptions unholdOptions = new UnholdOptions(target)
-        {
-            OperationContext = "unholdUserContext"
-        };
-
-        await callMedia.UnholdAsync(unholdOptions);
-        string successMessage = $"Participant taken off hold successfully. CallConnectionId: {callConnectionId}";
-        logger.LogInformation(successMessage);
-        LogCollector.Log(successMessage);
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error taking participant off hold. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        logger.LogInformation(errorMessage);
-        LogCollector.Log(errorMessage);
-        return Results.Problem($"Failed to take participant off hold: {ex.Message}");
-    }
-}).WithTags("Hold Participant APIs");
-
-app.MapPost("/unholdParticipant", (string pstnTarget, string callConnectionId, ILogger<Program> logger) =>
-{
-    try
-    {
-        CommunicationIdentifier target = new PhoneNumberIdentifier(pstnTarget);
-
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-
-        UnholdOptions unholdOptions = new UnholdOptions(target)
-        {
-            OperationContext = "unholdUserContext"
-        };
-
-        callMedia.Unhold(unholdOptions);
-        string successMessage = $"Participant taken off hold successfully. CallConnectionId: {callConnectionId}";
-        logger.LogInformation(successMessage);
-        LogCollector.Log(successMessage);
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error taking participant off hold. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        logger.LogInformation(errorMessage);
-        LogCollector.Log(errorMessage);
-        return Results.Problem($"Failed to take participant off hold: {ex.Message}");
-    }
-}).WithTags("Hold Participant APIs");
-
-app.MapPost("/interruptHoldWithPlay", (string pstnTarget, string callConnectionId, ILogger<Program> logger) =>
-{
-    try
-    {
-        CallMedia callMedia = GetCallMedia(callConnectionId);
-
-        TextSource textSource = new TextSource("Hi, This is interrupt audio and announcement test.")
-        {
-            VoiceName = "en-US-NancyNeural"
-        };
-
-        List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new PhoneNumberIdentifier(pstnTarget) };
-        PlayOptions playToOptions = new PlayOptions(textSource, playTo)
-        {
-            OperationContext = "playToContext",
-            InterruptHoldAudio = true
-        };
-
-        callMedia.Play(playToOptions);
-        string successMessage = $"Hold audio interrupted successfully. CallConnectionId: {callConnectionId}";
-        logger.LogInformation(successMessage);
-        LogCollector.Log(successMessage);
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error interrupting hold audio. CallConnectionId: {callConnectionId}. Error: {ex.Message}";
-        logger.LogInformation(errorMessage);
-        LogCollector.Log(errorMessage);
-        return Results.Problem($"Failed to interrupt hold audio: {ex.Message}");
-    }
-}).WithTags("Hold Participant APIs");
-*/
-#endregion
-#region Transcription
-/*
-app.MapPost("/createCallToPstnWithTranscriptionAsync", async (string targetPhoneNumber, ILogger<Program> logger) =>
-{
-    PhoneNumberIdentifier target = new PhoneNumberIdentifier(targetPhoneNumber);
-    PhoneNumberIdentifier caller = new PhoneNumberIdentifier(acsPhoneNumber);
-
-
-    var callbackUri = new Uri(new Uri(callbackUriHost), "/api/callbacks");
-    eventCallbackUri = callbackUri;
-    CallInvite callInvite = new CallInvite(target, caller);
-    var websocketUri = callbackUriHost.Replace("https", "wss") + "/ws";
-    TranscriptionOptions transcriptionOptions = new TranscriptionOptions(new Uri(websocketUri), TranscriptionTransport.Websocket,
-         "en-us", true);
-
-    var createCallOptions = new CreateCallOptions(callInvite, callbackUri)
-    {
-        CallIntelligenceOptions = new CallIntelligenceOptions() { CognitiveServicesEndpoint = new Uri(cognitiveServicesEndpoint) },
-        TranscriptionOptions = transcriptionOptions
-    };
-
-    CreateCallResult createCallResult = await client.CreateCallAsync(createCallOptions);
-
-    logger.LogInformation($"Created async pstn transcription call with connection id: {createCallResult.CallConnectionProperties.CallConnectionId}");
-}).WithTags("Transcription APIs");
-
-app.MapPost("/createCallToPstnWithTranscription", (string targetPhoneNumber, ILogger<Program> logger) =>
-{
-    PhoneNumberIdentifier target = new PhoneNumberIdentifier(targetPhoneNumber);
-    PhoneNumberIdentifier caller = new PhoneNumberIdentifier(acsPhoneNumber);
-
-    var callbackUri = new Uri(new Uri(callbackUriHost), "/api/callbacks");
-    eventCallbackUri = callbackUri;
-    CallInvite callInvite = new CallInvite(target, caller);
-
-    var websocketUri = callbackUriHost.Replace("https", "wss") + "/ws";
-    TranscriptionOptions transcriptionOptions = new TranscriptionOptions(new Uri(websocketUri), TranscriptionTransport.Websocket,
-         "en-us", true);
-    var createCallOptions = new CreateCallOptions(callInvite, callbackUri)
-    {
-        CallIntelligenceOptions = new CallIntelligenceOptions() { CognitiveServicesEndpoint = new Uri(cognitiveServicesEndpoint) },
-        TranscriptionOptions = transcriptionOptions
-    };
-
-    CreateCallResult createCallResult = client.CreateCall(createCallOptions);
-
-    logger.LogInformation($"Created pstn transcription call with connection id: {createCallResult.CallConnectionProperties.CallConnectionId}");
-}).WithTags("Transcription APIs");
-
-app.MapPost("/createCallToAcsWithTranscriptionAsync", async (string acsTarget, ILogger<Program> logger) =>
-{
-    var callbackUri = new Uri(new Uri(callbackUriHost), "/api/callbacks");
-    eventCallbackUri = callbackUri;
-    CallInvite callInvite = new CallInvite(new CommunicationUserIdentifier(acsTarget));
-    var websocketUri = callbackUriHost.Replace("https", "wss") + "/ws";
-    TranscriptionOptions transcriptionOptions = new TranscriptionOptions(new Uri(websocketUri), TranscriptionTransport.Websocket,
-         "en-us", true);
-
-    var createCallOptions = new CreateCallOptions(callInvite, callbackUri)
-    {
-        CallIntelligenceOptions = new CallIntelligenceOptions() { CognitiveServicesEndpoint = new Uri(cognitiveServicesEndpoint) },
-        TranscriptionOptions = transcriptionOptions
-    };
-
-    CreateCallResult createCallResult = await client.CreateCallAsync(createCallOptions);
-
-    logger.LogInformation($"Created async acs transcription call with connection id: {createCallResult.CallConnectionProperties.CallConnectionId}");
-}).WithTags("Transcription APIs");
-
-app.MapPost("/createCallToAcsWithTranscription", (string acsTarget, ILogger<Program> logger) =>
-{
-    var callbackUri = new Uri(new Uri(callbackUriHost), "/api/callbacks");
-    eventCallbackUri = callbackUri;
-    CallInvite callInvite = new CallInvite(new CommunicationUserIdentifier(acsTarget));
-    var websocketUri = callbackUriHost.Replace("https", "wss") + "/ws";
-    TranscriptionOptions transcriptionOptions = new TranscriptionOptions(new Uri(websocketUri), TranscriptionTransport.Websocket,
-          "en-us", true);
-
-    var createCallOptions = new CreateCallOptions(callInvite, callbackUri)
-    {
-        CallIntelligenceOptions = new CallIntelligenceOptions() { CognitiveServicesEndpoint = new Uri(cognitiveServicesEndpoint) },
-        TranscriptionOptions = transcriptionOptions
-    };
-
-    CreateCallResult createCallResult = client.CreateCall(createCallOptions);
-
-    logger.LogInformation($"Created acs transcription call with connection id: {createCallResult.CallConnectionProperties.CallConnectionId}");
-}).WithTags("Transcription APIs");
-
-app.MapPost("/createCallToTeamsWithTranscriptionAsync", async (string teamsObjectId, ILogger<Program> logger) =>
-{
-    var callbackUri = new Uri(new Uri(callbackUriHost), "/api/callbacks");
-    eventCallbackUri = callbackUri;
-    CallInvite callInvite = new CallInvite(new MicrosoftTeamsUserIdentifier(teamsObjectId));
-    var websocketUri = callbackUriHost.Replace("https", "wss") + "/ws";
-    TranscriptionOptions transcriptionOptions = new TranscriptionOptions(new Uri(websocketUri), TranscriptionTransport.Websocket,
-           "en-us", true);
-
-    var createCallOptions = new CreateCallOptions(callInvite, callbackUri)
-    {
-        CallIntelligenceOptions = new CallIntelligenceOptions() { CognitiveServicesEndpoint = new Uri(cognitiveServicesEndpoint) },
-        TranscriptionOptions = transcriptionOptions
-    };
-
-    CreateCallResult createCallResult = await client.CreateCallAsync(createCallOptions);
-
-    logger.LogInformation($"Created async teams transcription call with connection id: {createCallResult.CallConnectionProperties.CallConnectionId}");
-}).WithTags("Transcription APIs");
-
-app.MapPost("/createCallToTeamsWithTranscription", (string teamsObjectId, ILogger<Program> logger) =>
-{
-    var callbackUri = new Uri(new Uri(callbackUriHost), "/api/callbacks");
-    eventCallbackUri = callbackUri;
-    CallInvite callInvite = new CallInvite(new MicrosoftTeamsUserIdentifier(teamsObjectId));
-    var websocketUri = callbackUriHost.Replace("https", "wss") + "/ws";
-    TranscriptionOptions transcriptionOptions = new TranscriptionOptions(new Uri(websocketUri), TranscriptionTransport.Websocket,
-           "en-us", true);
-
-    var createCallOptions = new CreateCallOptions(callInvite, callbackUri)
-    {
-        CallIntelligenceOptions = new CallIntelligenceOptions() { CognitiveServicesEndpoint = new Uri(cognitiveServicesEndpoint) },
-        TranscriptionOptions = transcriptionOptions
-    };
-
-    CreateCallResult createCallResult = client.CreateCall(createCallOptions);
-
-    logger.LogInformation($"Created teams transcription call with connection id: {createCallResult.CallConnectionProperties.CallConnectionId}");
-}).WithTags("Transcription APIs");
-
-app.MapPost("/startTranscriptionAsync", async (ILogger<Program> logger) =>
-{
-    CallMedia callMedia = GetCallMedia();
-    await callMedia.StartTranscriptionAsync();
-    return Results.Ok();
-}).WithTags("Transcription APIs");
-
-app.MapPost("/startTranscription", (ILogger<Program> logger) =>
-{
-    CallMedia callMedia = GetCallMedia();
-    callMedia.StartTranscription();
-    return Results.Ok();
-}).WithTags("Transcription APIs");
-
-app.MapPost("/updateTranscriptionAsync", async (string locale, ILogger<Program> logger) =>
-{
-    CallMedia callMedia = GetCallMedia();
-    await callMedia.UpdateTranscriptionAsync(locale);
-    return Results.Ok();
-}).WithTags("Transcription APIs");
-
-app.MapPost("/updateTranscription", (string locale, ILogger<Program> logger) =>
-{
-    CallMedia callMedia = GetCallMedia();
-    callMedia.UpdateTranscription(locale);
-    return Results.Ok();
-}).WithTags("Transcription APIs");
-
-app.MapPost("/stopTranscriptionAsync", async (ILogger<Program> logger) =>
-{
-    CallMedia callMedia = GetCallMedia();
-    await callMedia.StopTranscriptionAsync();
-    return Results.Ok();
-}).WithTags("Transcription APIs");
-
-app.MapPost("/stopTranscription", (ILogger<Program> logger) =>
-{
-    CallMedia callMedia = GetCallMedia();
-    callMedia.StopTranscription();
-    return Results.Ok();
-}).WithTags("Transcription APIs");
-
-app.MapPost("/startTranscriptionWithOptionsAsync", async (ILogger<Program> logger) =>
-{
-    CallMedia callMedia = GetCallMedia();
-    StartTranscriptionOptions startTranscriptionOptions = new StartTranscriptionOptions()
-    {
-        OperationContext = "StartTranscriptionContext",
-        Locale = "en-us"
-    };
-    await callMedia.StartTranscriptionAsync(startTranscriptionOptions);
-    return Results.Ok();
-}).WithTags("Transcription APIs");
-
-app.MapPost("/startTranscriptionWithOptions", (ILogger<Program> logger) =>
-{
-    CallMedia callMedia = GetCallMedia();
-    StartTranscriptionOptions startTranscriptionOptions = new StartTranscriptionOptions()
-    {
-        OperationContext = "StartTranscriptionContext",
-        Locale = "en-us"
-    };
-    callMedia.StartTranscription(startTranscriptionOptions);
-    return Results.Ok();
-}).WithTags("Transcription APIs");
-
-app.MapPost("/stopTranscriptionWithOptionsAsync", async (ILogger<Program> logger) =>
-{
-    CallMedia callMedia = GetCallMedia();
-    await callMedia.StopTranscriptionAsync();
-    return Results.Ok();
-}).WithTags("Transcription APIs");
-
-app.MapPost("/stopTranscriptionWithOptions", (ILogger<Program> logger) =>
-{
-    CallMedia callMedia = GetCallMedia();
-    callMedia.StopTranscription();
-    return Results.Ok();
-}).WithTags("Transcription APIs");
-
-*/
-#endregion
-#region Play Media with text Source
-
-//app.MapPost("/playTextSourceToPstnTargetAsync", async (string pstnTarget, ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-
-//    TextSource textSource = new TextSource("Hi, this is test source played through play source thanks. Goodbye!.")
-//    {
-//        VoiceName = "en-US-NancyNeural"
-//    };
-
-//    List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new PhoneNumberIdentifier(pstnTarget) };
-//    PlayOptions playToOptions = new PlayOptions(textSource, playTo)
-//    {
-//        OperationContext = "playToContext"
-//    };
-
-//    await callMedia.PlayAsync(playToOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play TextSource Media APIs");
-
-//app.MapPost("/playTextSourceToPstnTarget", (string pstnTarget, ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-
-//    TextSource textSource = new TextSource("Hi, this is test source played through play source thanks. Goodbye!.")
-//    {
-//        VoiceName = "en-US-NancyNeural"
-//    };
-
-//    List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new PhoneNumberIdentifier(pstnTarget) };
-//    PlayOptions playToOptions = new PlayOptions(textSource, playTo)
-//    {
-//        OperationContext = "playToContext"
-//    };
-
-//    callMedia.Play(playToOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play TextSource Media APIs");
-
-//app.MapPost("/playTextSourceAcsTargetAsync", async (string acsTarget, ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-
-//    TextSource textSource = new TextSource("Hi, this is test source played through play source thanks. Goodbye!.")
-//    {
-//        VoiceName = "en-US-NancyNeural"
-//    };
-
-//    List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new CommunicationUserIdentifier(acsTarget) };
-//    PlayOptions playToOptions = new PlayOptions(textSource, playTo)
-//    {
-//        OperationContext = "playToContext"
-//    };
-
-//    await callMedia.PlayAsync(playToOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play TextSource Media APIs");
-
-//app.MapPost("/playTextSourceToAcsTarget", (string acsTarget, ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-
-//    TextSource textSource = new TextSource("Hi, this is test source played through play source thanks. Goodbye!.")
-//    {
-//        VoiceName = "en-US-NancyNeural"
-//    };
-
-//    List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new CommunicationUserIdentifier(acsTarget) };
-//    PlayOptions playToOptions = new PlayOptions(textSource, playTo)
-//    {
-//        OperationContext = "playToContext"
-//    };
-
-//    callMedia.Play(playToOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play TextSource Media APIs");
-
-//app.MapPost("/playTextSourceToTeamsTargetAsync", async (string teamsObjectId, ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-
-//    TextSource textSource = new TextSource("Hi, this is test source played through play source thanks. Goodbye!.")
-//    {
-//        VoiceName = "en-US-NancyNeural"
-//    };
-
-//    List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new MicrosoftTeamsUserIdentifier(teamsObjectId) };
-//    PlayOptions playToOptions = new PlayOptions(textSource, playTo)
-//    {
-//        OperationContext = "playToContext"
-//    };
-
-//    await callMedia.PlayAsync(playToOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play TextSource Media APIs");
-
-//app.MapPost("/playTextSourceToTeamsTarget", (string teamsObjectId, ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-
-//    TextSource textSource = new TextSource("Hi, this is test source played through play source thanks. Goodbye!.")
-//    {
-//        VoiceName = "en-US-NancyNeural"
-//    };
-
-//    List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new MicrosoftTeamsUserIdentifier(teamsObjectId) };
-//    PlayOptions playToOptions = new PlayOptions(textSource, playTo)
-//    {
-//        OperationContext = "playToContext"
-//    };
-
-//    callMedia.Play(playToOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play TextSource Media APIs");
-
-//app.MapPost("/playTextSourceToAllAsync", async (ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-
-//    TextSource textSource = new TextSource("Hi, this is test source played through play source thanks. Goodbye!.")
-//    {
-//        VoiceName = "en-US-NancyNeural"
-//    };
-
-//    PlayToAllOptions playToAllOptions = new PlayToAllOptions(textSource)
-//    {
-//        OperationContext = "playToAllContext"
-//    };
-//    await callMedia.PlayToAllAsync(playToAllOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play TextSource Media APIs");
-
-//app.MapPost("/playTextSourceToAll", (ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-
-//    TextSource textSource = new TextSource("Hi, this is test source played through play source thanks. Goodbye!.")
-//    {
-//        VoiceName = "en-US-NancyNeural"
-//    };
-
-//    PlayToAllOptions playToAllOptions = new PlayToAllOptions(textSource)
-//    {
-//        OperationContext = "playToAllContext"
-//    };
-//    callMedia.PlayToAll(playToAllOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play TextSource Media APIs");
-
-//app.MapPost("/playTextSourceBargeInAsync", async (ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-
-//    TextSource textSource = new TextSource("Hi, this is barge in test played through play source thanks. Goodbye!.")
-//    {
-//        VoiceName = "en-US-NancyNeural"
-//    };
-
-//    PlayToAllOptions playToAllOptions = new PlayToAllOptions(textSource)
-//    {
-//        OperationContext = "playToAllContext",
-//        InterruptCallMediaOperation = true
-//    };
-//    await callMedia.PlayToAllAsync(playToAllOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play TextSource Media APIs");
-
-#endregion
-#region Play Media with Ssml Source
-
-//app.MapPost("/playSsmlSourceToPstnTargetAsync", async (string pstnTarget, ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-
-//    SsmlSource ssmlSource = new SsmlSource("<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"en-US\"><voice name=\"en-US-JennyNeural\">Hi, this is ssml test played through ssml source thanks. Goodbye!</voice></speak>");
-
-//    List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new PhoneNumberIdentifier(pstnTarget) };
-//    PlayOptions playToOptions = new PlayOptions(ssmlSource, playTo)
-//    {
-//        OperationContext = "playToContext"
-//    };
-
-//    await callMedia.PlayAsync(playToOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play SsmlSource Media APIs");
-
-//app.MapPost("/playSsmlSourceToPstnTarget", (string pstnTarget, ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-//    SsmlSource ssmlSource = new SsmlSource("<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"en-US\"><voice name=\"en-US-JennyNeural\">Hi, this is ssml test played through ssml source thanks. Goodbye!</voice></speak>");
-//    List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new PhoneNumberIdentifier(pstnTarget) };
-//    PlayOptions playToOptions = new PlayOptions(ssmlSource, playTo)
-//    {
-//        OperationContext = "playToContext"
-//    };
-
-//    callMedia.Play(playToOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play SsmlSource Media APIs");
-
-//app.MapPost("/playSsmlSourceAcsTargetAsync", async (string acsTarget, ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-//    SsmlSource ssmlSource = new SsmlSource("<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"en-US\"><voice name=\"en-US-JennyNeural\">Hi, this is ssml test played through ssml source thanks. Goodbye!</voice></speak>");
-//    List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new CommunicationUserIdentifier(acsTarget) };
-//    PlayOptions playToOptions = new PlayOptions(ssmlSource, playTo)
-//    {
-//        OperationContext = "playToContext"
-//    };
-
-//    await callMedia.PlayAsync(playToOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play SsmlSource Media APIs");
-
-//app.MapPost("/playSsmlSourceToAcsTarget", (string acsTarget, ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-//    SsmlSource ssmlSource = new SsmlSource("<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"en-US\"><voice name=\"en-US-JennyNeural\">Hi, this is ssml test played through ssml source thanks. Goodbye!</voice></speak>");
-
-//    List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new CommunicationUserIdentifier(acsTarget) };
-//    PlayOptions playToOptions = new PlayOptions(ssmlSource, playTo)
-//    {
-//        OperationContext = "playToContext"
-//    };
-
-//    callMedia.Play(playToOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play SsmlSource Media APIs");
-
-//app.MapPost("/playSsmlSourceToTeamsTargetAsync", async (string teamsObjectId, ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-//    SsmlSource ssmlSource = new SsmlSource("<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"en-US\"><voice name=\"en-US-JennyNeural\">Hi, this is ssml test played through ssml source thanks. Goodbye!</voice></speak>");
-//    List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new MicrosoftTeamsUserIdentifier(teamsObjectId) };
-//    PlayOptions playToOptions = new PlayOptions(ssmlSource, playTo)
-//    {
-//        OperationContext = "playToContext"
-//    };
-
-//    await callMedia.PlayAsync(playToOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play SsmlSource Media APIs");
-
-//app.MapPost("/playSsmlSourceToTeamsTarget", (string teamsObjectId, ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-//    SsmlSource ssmlSource = new SsmlSource("<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"en-US\"><voice name=\"en-US-JennyNeural\">Hi, this is ssml test played through ssml source thanks. Goodbye!</voice></speak>");
-//    List<CommunicationIdentifier> playTo = new List<CommunicationIdentifier> { new MicrosoftTeamsUserIdentifier(teamsObjectId) };
-//    PlayOptions playToOptions = new PlayOptions(ssmlSource, playTo)
-//    {
-//        OperationContext = "playToContext"
-//    };
-
-//    callMedia.Play(playToOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play SsmlSource Media APIs");
-
-//app.MapPost("/playSsmlSourceToAllAsync", async (ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-//    SsmlSource ssmlSource = new SsmlSource("<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"en-US\"><voice name=\"en-US-JennyNeural\">Hi, this is ssml test played through ssml source thanks. Goodbye!</voice></speak>");
-//    PlayToAllOptions playToAllOptions = new PlayToAllOptions(ssmlSource)
-//    {
-//        OperationContext = "playToAllContext"
-//    };
-//    await callMedia.PlayToAllAsync(playToAllOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play SsmlSource Media APIs");
-
-//app.MapPost("/playSsmlSourceToAll", (ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-//    SsmlSource ssmlSource = new SsmlSource("<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"en-US\"><voice name=\"en-US-JennyNeural\">Hi, this is ssml test played through ssml source thanks. Goodbye!</voice></speak>");
-
-//    PlayToAllOptions playToAllOptions = new PlayToAllOptions(ssmlSource)
-//    {
-//        OperationContext = "playToAllContext"
-//    };
-//    callMedia.PlayToAll(playToAllOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play SsmlSource Media APIs");
-
-//app.MapPost("/playSsmlSourceBargeInAsync", async (ILogger<Program> logger) =>
-//{
-//    CallMedia callMedia = GetCallMedia();
-//    SsmlSource ssmlSource = new SsmlSource("<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"en-US\"><voice name=\"en-US-JennyNeural\">Hi, this is ssml barge in test played through ssml source thanks. Goodbye!</voice></speak>");
-//    PlayToAllOptions playToAllOptions = new PlayToAllOptions(ssmlSource)
-//    {
-//        OperationContext = "playBargeInContext",
-//        InterruptCallMediaOperation = true
-//    };
-//    await callMedia.PlayToAllAsync(playToAllOptions);
-
-//    return Results.Ok();
-//}).WithTags("Play SsmlSource Media APIs");
-
-#endregion
-#region Media streaming
-/*
-app.MapPost("/createCallToPstnWithMediaStreamingAsync", async (string targetPhoneNumber, bool isEnableBidirectional, bool isPcm24kMono, ILogger<Program> logger) =>
-{
-    try
-    {
-        PhoneNumberIdentifier target = new PhoneNumberIdentifier(targetPhoneNumber);
-        PhoneNumberIdentifier caller = new PhoneNumberIdentifier(acsPhoneNumber);
-
-
-        var callbackUri = new Uri(new Uri(callbackUriHost), "/api/callbacks");
-        eventCallbackUri = callbackUri;
-        CallInvite callInvite = new CallInvite(target, caller);
-        var websocketUri = callbackUriHost.Replace("https", "wss") + "/ws";
-        MediaStreamingOptions mediaStreamingOptions = new MediaStreamingOptions(new Uri(websocketUri), MediaStreamingContent.Audio,
-            MediaStreamingAudioChannel.Unmixed, MediaStreamingTransport.Websocket, true);
-        mediaStreamingOptions.EnableBidirectional = isEnableBidirectional;
-        mediaStreamingOptions.AudioFormat = isPcm24kMono ? AudioFormat.Pcm24KMono : AudioFormat.Pcm16KMono;
-
-        var createCallOptions = new CreateCallOptions(callInvite, callbackUri)
-        {
-            // ACS GCCH Phase 2
-            // CallIntelligenceOptions = new CallIntelligenceOptions() { CognitiveServicesEndpoint = new Uri(cognitiveServicesEndpoint) },
-            MediaStreamingOptions = mediaStreamingOptions
-        };
-
-        CreateCallResult createCallResult = await client.CreateCallAsync(createCallOptions);
-        string callConnectionId = createCallResult.CallConnectionProperties.CallConnectionId;
-        
-        string successMessage = $"Created async pstn media streaming call with connection id: {callConnectionId}";
-        logger.LogInformation(successMessage);
-        LogCollector.Log(successMessage);
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error creating PSTN call with media streaming: {ex.Message}";
-        logger.LogInformation(errorMessage);
-        LogCollector.Log(errorMessage);
-        return Results.Problem($"Failed to create PSTN call with media streaming: {ex.Message}");
-    }
-}).WithTags("Media streaming APIs");
-
-app.MapPost("/createCallToPstnWithMediaStreaming", (string targetPhoneNumber, bool isEnableBidirectional, bool isPcm24kMono, ILogger<Program> logger) =>
-{
-    try
-    {
-        PhoneNumberIdentifier target = new PhoneNumberIdentifier(targetPhoneNumber);
-        PhoneNumberIdentifier caller = new PhoneNumberIdentifier(acsPhoneNumber);
-
-
-        var callbackUri = new Uri(new Uri(callbackUriHost), "/api/callbacks");
-        eventCallbackUri = callbackUri;
-        CallInvite callInvite = new CallInvite(target, caller);
-        var websocketUri = callbackUriHost.Replace("https", "wss") + "/ws";
-        MediaStreamingOptions mediaStreamingOptions = new MediaStreamingOptions(new Uri(websocketUri), MediaStreamingContent.Audio,
-            MediaStreamingAudioChannel.Unmixed, MediaStreamingTransport.Websocket, true);
-        mediaStreamingOptions.EnableBidirectional = isEnableBidirectional;
-        mediaStreamingOptions.AudioFormat = isPcm24kMono ? AudioFormat.Pcm24KMono : AudioFormat.Pcm16KMono;
-
-        var createCallOptions = new CreateCallOptions(callInvite, callbackUri)
-        {
-            // ACS GCCH Phase 2
-            // CallIntelligenceOptions = new CallIntelligenceOptions() { CognitiveServicesEndpoint = new Uri(cognitiveServicesEndpoint) },
-            MediaStreamingOptions = mediaStreamingOptions
-        };
-
-        CreateCallResult createCallResult = client.CreateCall(createCallOptions);
-        string callConnectionId = createCallResult.CallConnectionProperties.CallConnectionId;
-        
-        string successMessage = $"Created pstn media streaming call with connection id: {callConnectionId}";
-        logger.LogInformation(successMessage);
-        LogCollector.Log(successMessage);
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error creating PSTN call with media streaming: {ex.Message}";
-        logger.LogInformation(errorMessage);
-        LogCollector.Log(errorMessage);
-        return Results.Problem($"Failed to create PSTN call with media streaming: {ex.Message}");
-    }
-}).WithTags("Media streaming APIs");
-*/
-/*
-app.MapPost("/createCallToTeamsWithMediaStreamingAsync", async (string teamsObjectId, bool isEnableBidirectional, bool isPcm24kMono, ILogger<Program> logger) =>
-{
-    try
-    {
-        var callbackUri = new Uri(new Uri(callbackUriHost), "/api/callbacks");
-        eventCallbackUri = callbackUri;
-        CallInvite callInvite = new CallInvite(new MicrosoftTeamsUserIdentifier(teamsObjectId));
-        var websocketUri = callbackUriHost.Replace("https", "wss") + "/ws";
-        MediaStreamingOptions mediaStreamingOptions = new MediaStreamingOptions(new Uri(websocketUri), MediaStreamingContent.Audio,
-            MediaStreamingAudioChannel.Unmixed, MediaStreamingTransport.Websocket, true);
-        mediaStreamingOptions.EnableBidirectional = isEnableBidirectional;
-        mediaStreamingOptions.AudioFormat = isPcm24kMono ? AudioFormat.Pcm24KMono : AudioFormat.Pcm16KMono;
-
-        var createCallOptions = new CreateCallOptions(callInvite, callbackUri)
-        {
-            // ACS GCCH Phase 2
-            // CallIntelligenceOptions = new CallIntelligenceOptions() { CognitiveServicesEndpoint = new Uri(cognitiveServicesEndpoint) },
-            MediaStreamingOptions = mediaStreamingOptions
-        };
-
-        CreateCallResult createCallResult = await client.CreateCallAsync(createCallOptions);
-        string callConnectionId = createCallResult.CallConnectionProperties.CallConnectionId;
-        
-        string successMessage = $"Created async teams call with connection id: {callConnectionId}";
-        logger.LogInformation(successMessage);
-        LogCollector.Log(successMessage);
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error creating Teams call with media streaming: {ex.Message}";
-        logger.LogInformation(errorMessage);
-        LogCollector.Log(errorMessage);
-        return Results.Problem($"Failed to create Teams call with media streaming: {ex.Message}");
-    }
-}).WithTags("Media streaming APIs");
-
-app.MapPost("/createCallToTeamsWithMediaStreaming", (string teamsObjectId, bool isEnableBidirectional, bool isPcm24kMono, ILogger<Program> logger) =>
-{
-    try
-    {
-        var callbackUri = new Uri(new Uri(callbackUriHost), "/api/callbacks");
-        eventCallbackUri = callbackUri;
-        CallInvite callInvite = new CallInvite(new MicrosoftTeamsUserIdentifier(teamsObjectId));
-        var websocketUri = callbackUriHost.Replace("https", "wss") + "/ws";
-        MediaStreamingOptions mediaStreamingOptions = new MediaStreamingOptions(new Uri(websocketUri), MediaStreamingContent.Audio,
-            MediaStreamingAudioChannel.Unmixed, MediaStreamingTransport.Websocket, true);
-        mediaStreamingOptions.EnableBidirectional = isEnableBidirectional;
-        mediaStreamingOptions.AudioFormat = isPcm24kMono ? AudioFormat.Pcm24KMono : AudioFormat.Pcm16KMono;
-
-        var createCallOptions = new CreateCallOptions(callInvite, callbackUri)
-        {
-            // ACS GCCH Phase 2
-            // CallIntelligenceOptions = new CallIntelligenceOptions() { CognitiveServicesEndpoint = new Uri(cognitiveServicesEndpoint) },
-            MediaStreamingOptions = mediaStreamingOptions
-        };
-
-        CreateCallResult createCallResult = client.CreateCall(createCallOptions);
-        string callConnectionId = createCallResult.CallConnectionProperties.CallConnectionId;
-        
-        string successMessage = $"Created teams call with connection id: {callConnectionId}";
-        logger.LogInformation(successMessage);
-        LogCollector.Log(successMessage);
-        return Results.Ok(new { CallConnectionId = callConnectionId, Status = "Succeeded" });
-    }
-    catch (Exception ex)
-    {
-        string errorMessage = $"Error creating Teams call with media streaming: {ex.Message}";
-        logger.LogInformation(errorMessage);
-        LogCollector.Log(errorMessage);
-        return Results.Problem($"Failed to create Teams call with media streaming: {ex.Message}");
-    }
-}).WithTags("Media streaming APIs");
-*/
-#endregion
-

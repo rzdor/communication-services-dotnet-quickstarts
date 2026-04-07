@@ -7,6 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Content Include="Properties\launchSettings.json" />
+  </ItemGroup>
+
+  <ItemGroup>
 	<PackageReference Include="Azure.Communication.CallAutomation" Version="1.5.0-alpha.20250605.1" />
 	<PackageReference Include="Azure.Messaging.EventGrid" Version="4.16.0" />
     <PackageReference Include="Azure.Storage.Blobs" Version="12.22.0" />

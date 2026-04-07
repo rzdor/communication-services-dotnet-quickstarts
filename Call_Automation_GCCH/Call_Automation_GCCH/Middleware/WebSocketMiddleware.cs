@@ -14,7 +14,7 @@
       if (context.Request.Path == "/ws" && context.WebSockets.IsWebSocketRequest)
       {
         using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
-        await Helper.ProcessRequest(webSocket);
+        await WebSocketStreamingHandler.ProcessRequest(webSocket);
       }
       else
       {

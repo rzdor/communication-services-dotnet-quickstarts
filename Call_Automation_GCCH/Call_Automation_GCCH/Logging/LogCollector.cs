@@ -2,8 +2,14 @@
 using System.Collections.Generic;
 using System.Linq;
 
-public static class LogCollector
+namespace Call_Automation_GCCH.Logging
 {
+    /// <summary>
+    /// Thread-safe in-memory log collector that stores recent log entries
+    /// and makes them available for the Swagger UI log viewer.
+    /// </summary>
+    public static class LogCollector
+    {
     private static readonly List<LogEntry> _logs = new();
     private static readonly object _lock = new();
 
@@ -52,8 +58,9 @@ public static class LogCollector
 
     public static void Log(string message)
     {
-        Console.WriteLine(message);     // Log to terminal
-        Add(message);                   // Log to UI collector
+        Console.WriteLine(message);
+        Add(message);
     }
 
+  }
 }

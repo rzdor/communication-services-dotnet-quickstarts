@@ -1,14 +1,19 @@
 ﻿using Microsoft.Extensions.Logging;
 
-public class ConsoleCollectorLoggerProvider : ILoggerProvider
+namespace Call_Automation_GCCH.Logging
 {
-    public ILogger CreateLogger(string categoryName)
+    /// <summary>
+    /// Provider that creates <see cref="ConsoleCollectorLogger"/> instances for the DI logging pipeline.
+    /// </summary>
+    public class ConsoleCollectorLoggerProvider : ILoggerProvider
     {
-        return new ConsoleCollectorLogger(categoryName);
-    }
+        public ILogger CreateLogger(string categoryName)
+        {
+            return new ConsoleCollectorLogger(categoryName);
+        }
 
-    public void Dispose()
-    {
-        // If you need to dispose resources, do it here
+        public void Dispose()
+        {
+        }
     }
 }

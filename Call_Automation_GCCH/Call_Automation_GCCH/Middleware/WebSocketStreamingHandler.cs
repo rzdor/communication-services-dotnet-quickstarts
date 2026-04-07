@@ -1,11 +1,16 @@
 ﻿using Azure.Communication.CallAutomation;
+using Azure.Communication.CallAutomation;
+using Call_Automation_GCCH.Logging;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 
 namespace Call_Automation_GCCH
 {
-    public static class Helper
+    /// <summary>
+    /// Processes incoming WebSocket connections for media streaming and transcription data.
+    /// </summary>
+    public static class WebSocketStreamingHandler
     {
         public static async Task ProcessRequest(WebSocket webSocket)
         {

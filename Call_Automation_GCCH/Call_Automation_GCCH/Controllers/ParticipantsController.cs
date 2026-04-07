@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Azure;
 using Azure.Communication;
@@ -16,13 +18,13 @@ namespace Call_Automation_GCCH.Controllers
     [Produces("application/json")]
     public class ParticipantsController : ControllerBase
     {
-        private readonly CallAutomationService _service;
+        private readonly ICallAutomationService _service;
         private readonly ILogger<ParticipantsController> _logger;
-        private readonly ConfigurationRequest _config; // final, bound object
+        private readonly AcsCommunicationSettings _config;
 
         public ParticipantsController(
-            CallAutomationService service,
-            ILogger<ParticipantsController> logger, IOptions<ConfigurationRequest> configOptions)
+            ICallAutomationService service,
+            ILogger<ParticipantsController> logger, IOptions<AcsCommunicationSettings> configOptions)
         {
             _service = service ?? throw new ArgumentNullException(nameof(service));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -31,21 +33,33 @@ namespace Call_Automation_GCCH.Controllers
 
         // ─ Add ───────────────────────────────────────────────────────────────────────
 
+        /// <summary>
+        /// Adds a participant to an active call.
+        /// </summary>
+        /// <param name="callConnectionId">The call connection ID</param>
+        /// <param name="participantId">ACS user ID (8:...) or phone number (+...)</param>
+        /// <param name="isPstn">True if participant is a PSTN number</param>
+        /// <param name="invitationTimeoutInSeconds">Seconds to wait before the invitation times out</param>
+        /// <param name="operationContext">Custom context string for correlating events</param>
         [HttpPost("addParticipant")]
         [Tags("Add/Remove Participant APIs")]
         public IActionResult AddParticipant(
             string callConnectionId,
             string participantId,
-            bool isPstn = false)
-            => HandleAddParticipant(callConnectionId, participantId, isPstn, async: false).Result;
+            bool isPstn = false,
+            int invitationTimeoutInSeconds = 30,
+            string operationContext = "addParticipantContext")
+            => HandleAddParticipant(callConnectionId, participantId, isPstn, invitationTimeoutInSeconds, operationContext, async: false).Result;
 
         [HttpPost("addParticipantAsync")]
         [Tags("Add/Remove Participant APIs")]
         public Task<IActionResult> AddParticipantAsync(
             string callConnectionId,
             string participantId,
-            bool isPstn = false)
-            => HandleAddParticipant(callConnectionId, participantId, isPstn, async: true);
+            bool isPstn = false,
+            int invitationTimeoutInSeconds = 30,
+            string operationContext = "addParticipantContext")
+            => HandleAddParticipant(callConnectionId, participantId, isPstn, invitationTimeoutInSeconds, operationContext, async: true);
 
         // ─ Remove ────────────────────────────────────────────────────────────────────
 
@@ -54,16 +68,18 @@ namespace Call_Automation_GCCH.Controllers
         public IActionResult RemoveParticipant(
             string callConnectionId,
             string participantId,
-            bool isPstn = false)
-            => HandleRemoveParticipant(callConnectionId, participantId, isPstn, async: false).Result;
+            bool isPstn = false,
+            string operationContext = "removeParticipantContext")
+            => HandleRemoveParticipant(callConnectionId, participantId, isPstn, operationContext, async: false).Result;
 
         [HttpPost("removeParticipantAsync")]
         [Tags("Add/Remove Participant APIs")]
         public Task<IActionResult> RemoveParticipantAsync(
             string callConnectionId,
             string participantId,
-            bool isPstn = false)
-            => HandleRemoveParticipant(callConnectionId, participantId, isPstn, async: true);
+            bool isPstn = false,
+            string operationContext = "removeParticipantContext")
+            => HandleRemoveParticipant(callConnectionId, participantId, isPstn, operationContext, async: true);
 
         // ─ Get ───────────────────────────────────────────────────────────────────────
 
@@ -101,23 +117,55 @@ namespace Call_Automation_GCCH.Controllers
             bool isPstn = false)
             => HandleMuteParticipant(callConnectionId, participantId, isPstn, async: true);
 
+        // ─ Get All Participants ──────────────────────────────────────────────────────
+
+        [HttpGet("getParticipants")]
+        [Tags("Get Participant APIs")]
+        public IActionResult GetParticipants(string callConnectionId)
+            => HandleGetAllParticipants(callConnectionId, async: false).Result;
+
+        [HttpGet("getParticipantsAsync")]
+        [Tags("Get Participant APIs")]
+        public Task<IActionResult> GetParticipantsAsync(string callConnectionId)
+            => HandleGetAllParticipants(callConnectionId, async: true);
+
+        // ─ Cancel Add Participant ────────────────────────────────────────────────────
+
+        [HttpPost("cancelAddParticipant")]
+        [Tags("Add/Remove Participant APIs")]
+        public IActionResult CancelAddParticipant(
+            string callConnectionId,
+            string invitationId,
+            string operationContext = "cancelAddParticipantContext")
+            => HandleCancelAddParticipant(callConnectionId, invitationId, operationContext, async: false).Result;
+
+        [HttpPost("cancelAddParticipantAsync")]
+        [Tags("Add/Remove Participant APIs")]
+        public Task<IActionResult> CancelAddParticipantAsync(
+            string callConnectionId,
+            string invitationId,
+            string operationContext = "cancelAddParticipantContext")
+            => HandleCancelAddParticipant(callConnectionId, invitationId, operationContext, async: true);
+
         // ─────────────── Shared Handlers ────────────────────────────────────────────
 
         private async Task<IActionResult> HandleAddParticipant(
             string callConnectionId,
             string participantId,
             bool isPstn,
+            int invitationTimeoutInSeconds,
+            string operationContext,
             bool async)
         {
             var opName = isPstn ? "PSTN" : "ACS";
-            _logger.LogInformation($"Starting to add {opName} participant: {participantId} for call {callConnectionId}");
+            _logger.LogInformation("Adding {OpName} participant {ParticipantId} to call {CallId}, Timeout={Timeout}s",
+                opName, participantId, callConnectionId, invitationTimeoutInSeconds);
 
             try
             {
                 var props = _service.GetCallConnectionProperties(callConnectionId);
                 var connection = _service.GetCallConnection(callConnectionId);
 
-                // build invite
                 CallInvite invite = isPstn
                     ? new CallInvite(
                           new PhoneNumberIdentifier(participantId),
@@ -126,10 +174,8 @@ namespace Call_Automation_GCCH.Controllers
 
                 var options = new AddParticipantOptions(invite)
                 {
-                    OperationContext = isPstn
-                        ? "addPstnUserContext"
-                        : "addAcsUserContext",
-                    InvitationTimeoutInSeconds = 30
+                    OperationContext = operationContext,
+                    InvitationTimeoutInSeconds = invitationTimeoutInSeconds
                 };
 
                 Response<AddParticipantResult> result = async
@@ -158,10 +204,12 @@ namespace Call_Automation_GCCH.Controllers
             string callConnectionId,
             string participantId,
             bool isPstn,
+            string operationContext,
             bool async)
         {
             var opName = isPstn ? "PSTN" : "ACS";
-            _logger.LogInformation($"Starting to remove {opName} participant: {participantId} from call {callConnectionId}");
+            _logger.LogInformation("Removing {OpName} participant {ParticipantId} from call {CallId}",
+                opName, participantId, callConnectionId);
 
             try
             {
@@ -174,9 +222,7 @@ namespace Call_Automation_GCCH.Controllers
 
                 var options = new RemoveParticipantOptions(target)
                 {
-                    OperationContext = isPstn
-                        ? "removePstnParticipantContext"
-                        : "removeAcsParticipantContext"
+                    OperationContext = operationContext
                 };
 
                 Response<RemoveParticipantResult> result = async
@@ -284,6 +330,96 @@ namespace Call_Automation_GCCH.Controllers
             {
                 _logger.LogError(ex, $"Error muting {opName} participant");
                 return Problem($"Failed to mute participant: {ex.Message}");
+            }
+        }
+
+        private async Task<IActionResult> HandleGetAllParticipants(
+            string callConnectionId,
+            bool async)
+        {
+            _logger.LogInformation($"Getting all participants for call {callConnectionId}");
+
+            try
+            {
+                var props = _service.GetCallConnectionProperties(callConnectionId);
+                var connection = _service.GetCallConnection(callConnectionId);
+
+                IReadOnlyList<CallParticipant> participantList;
+
+                if (async)
+                {
+                    var response = await connection.GetParticipantsAsync();
+                    participantList = response.Value;
+                }
+                else
+                {
+                    var response = connection.GetParticipants();
+                    participantList = response.Value;
+                }
+
+                var participants = participantList.Select(p => new
+                {
+                    RawId = p.Identifier.RawId,
+                    IsOnHold = p.IsOnHold,
+                    IsMuted = p.IsMuted
+                }).ToList();
+
+                return Ok(new
+                {
+                    CallConnectionId = callConnectionId,
+                    CorrelationId = props.CorrelationId,
+                    Participants = participants
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting all participants");
+                return Problem($"Failed to get participants: {ex.Message}");
+            }
+        }
+
+        private async Task<IActionResult> HandleCancelAddParticipant(
+            string callConnectionId,
+            string invitationId,
+            string operationContext,
+            bool async)
+        {
+            if (string.IsNullOrEmpty(callConnectionId))
+                return BadRequest("callConnectionId is required");
+            if (string.IsNullOrEmpty(invitationId))
+                return BadRequest("invitationId is required");
+
+            _logger.LogInformation("Cancelling add participant. CallId={CallId}, InvitationId={InvitationId}", callConnectionId, invitationId);
+
+            try
+            {
+                var props = _service.GetCallConnectionProperties(callConnectionId);
+                var connection = _service.GetCallConnection(callConnectionId);
+
+                var options = new CancelAddParticipantOperationOptions(invitationId)
+                {
+                    OperationContext = operationContext
+                };
+
+                var result = async
+                    ? await connection.CancelAddParticipantOperationAsync(options)
+                    : connection.CancelAddParticipantOperation(options);
+
+                _logger.LogInformation(
+                    $"Cancel add participant succeeded: Call={callConnectionId}, CorrId={props.CorrelationId}, " +
+                    $"Status={result.GetRawResponse().Status}");
+
+                return Ok(new CallConnectionResponse
+                {
+                    CallConnectionId = callConnectionId,
+                    CorrelationId = props.CorrelationId,
+                    Status = result.GetRawResponse().Status.ToString()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error cancelling add participant");
+                return Problem($"Failed to cancel add participant: {ex.Message}");
             }
         }
     }

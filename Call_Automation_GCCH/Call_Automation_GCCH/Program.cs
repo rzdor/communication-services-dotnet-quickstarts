@@ -1,39 +1,47 @@
 using Azure.Communication;
 using Azure.Communication.CallAutomation;
-using Azure.Messaging;
-using Azure.Messaging.EventGrid;
-using Azure.Messaging.EventGrid.SystemEvents;
 using Call_Automation_GCCH;
-using Call_Automation_GCCH.Controllers;
+using Call_Automation_GCCH.Logging;
 using Call_Automation_GCCH.Models;
 using Call_Automation_GCCH.Services;
 using Microsoft.Extensions.FileProviders;
-using Microsoft.Extensions.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
 
 var commSection = builder.Configuration.GetSection("CommunicationSettings");
 // This reads "CommunicationSettings" from appsettings.json
-builder.Services.Configure<ConfigurationRequest>(commSection);
+builder.Services.Configure<AcsCommunicationSettings>(commSection);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-
-// Add CallAutomationService as a singleton
-builder.Services.AddSingleton<CallAutomationService>(sp => {
-    string connectionString = commSection["AcsConnectionString"];
-    bool isArizona = bool.Parse(commSection["IsArizona"] ?? "true");
-    string pmaEndpoint = isArizona ? commSection["PmaEndpointArizona"] : commSection["PmaEndpointTexas"];
-    
-    if (string.IsNullOrEmpty(pmaEndpoint)) {
-        sp.GetRequiredService<ILogger<Program>>().LogWarning($"The {(isArizona ? "PmaEndpointArizona" : "PmaEndpointTexas")} setting is empty");
-    }
-    
-    return new CallAutomationService(connectionString, pmaEndpoint, sp.GetRequiredService<ILogger<CallAutomationService>>());
+builder.Services.AddSwaggerGen(c =>
+{
+    c.OrderActionsBy(apiDesc =>
+    {
+        var tag = apiDesc.ActionDescriptor.EndpointMetadata
+            .OfType<Microsoft.AspNetCore.Http.TagsAttribute>()
+            .SelectMany(t => t.Tags)
+            .FirstOrDefault() ?? "zzz";
+        return tag;
+    });
 });
 
-// Add Storage Service
-builder.Services.AddScoped<IStorageService, StorageService>();
+// Add CallAutomationService as a singleton behind ICallAutomationService
+// Client is initialized lazily — use the /api/configuration/setConnectionString endpoint
+// to provide ACS credentials at runtime from Swagger.
+builder.Services.AddSingleton<ICallAutomationService, CallAutomationService>(sp => {
+    string connectionString = commSection["AcsConnectionString"] ?? string.Empty;
+    bool isArizona = bool.Parse(commSection["IsArizona"] ?? "true");
+    string pmaEndpoint = (isArizona ? commSection["PmaEndpointArizona"] : commSection["PmaEndpointTexas"]) ?? string.Empty;
+
+    var logger = sp.GetRequiredService<ILogger<CallAutomationService>>();
+
+    if (string.IsNullOrEmpty(connectionString))
+    {
+        logger.LogWarning("AcsConnectionString is not set. Use POST /api/configuration/setConnectionString to configure at runtime.");
+    }
+
+    return new CallAutomationService(connectionString, pmaEndpoint, logger);
+});
 
 builder.Logging.ClearProviders();
 builder.Logging.AddProvider(new ConsoleCollectorLoggerProvider());
@@ -78,7 +86,7 @@ app.Use(async (context, next) =>
     {
       logger.LogInformation("WebSocket request received.");
       using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
-      await Helper.ProcessRequest(webSocket);
+      await WebSocketStreamingHandler.ProcessRequest(webSocket);
     }
     else
     {

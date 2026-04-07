@@ -1,45 +1,48 @@
 ﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using System;
 
-public class ConsoleCollectorLogger : ILogger
+namespace Call_Automation_GCCH.Logging
 {
-    private readonly string _categoryName;
-
-    public ConsoleCollectorLogger(string categoryName)
+    /// <summary>
+    /// Custom ILogger implementation that writes to both the console
+    /// and the in-memory <see cref="LogCollector"/> for UI display.
+    /// </summary>
+    public class ConsoleCollectorLogger : ILogger
     {
-        _categoryName = categoryName;
-    }
+        private readonly string _categoryName;
 
-    public IDisposable BeginScope<TState>(TState state) => default!;
-
-    public bool IsEnabled(LogLevel logLevel)
-        => true; // You can add logLevel-based filtering if desired
-
-    public void Log<TState>(
-        LogLevel logLevel,
-        EventId eventId,
-        TState state,
-        Exception? exception,
-        Func<TState, Exception?, string> formatter)
-    {
-        if (!IsEnabled(logLevel))
-            return;
-
-        var message = formatter(state, exception);
-        if (!string.IsNullOrEmpty(message))
+        public ConsoleCollectorLogger(string categoryName)
         {
-            // Construct a log output string combining time, level, category, etc.
-            string logOutput = $"{DateTime.UtcNow:HH:mm:ss} [{logLevel}] {_categoryName}: {message}";
-            if (exception != null)
+            _categoryName = categoryName;
+        }
+
+        public IDisposable BeginScope<TState>(TState state) => default!;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (!IsEnabled(logLevel))
+                return;
+
+            var message = formatter(state, exception);
+            if (!string.IsNullOrEmpty(message))
             {
-                logOutput += Environment.NewLine + exception;
+                string logOutput = $"{DateTime.UtcNow:HH:mm:ss} [{logLevel}] {_categoryName}: {message}";
+                if (exception != null)
+                {
+                    logOutput += Environment.NewLine + exception;
+                }
+
+                Console.WriteLine(logOutput);
+                LogCollector.Log(logOutput);
             }
-
-            // Write to console
-            Console.WriteLine(logOutput);
-
-            // Also write to LogCollector
-            LogCollector.Log(logOutput);
         }
     }
 }

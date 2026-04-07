@@ -17,21 +17,18 @@ namespace Call_Automation_GCCH.Controllers
     [Produces("application/json")]
     public class RecordingsController : ControllerBase
     {
-        private readonly CallAutomationService _service;
+        private readonly ICallAutomationService _service;
         private readonly ILogger<RecordingsController> _logger;
-        private readonly ConfigurationRequest _config;
-        private readonly IStorageService _storageService;
+        private readonly AcsCommunicationSettings _config;
 
         public RecordingsController(
-            CallAutomationService service,
+            ICallAutomationService service,
             ILogger<RecordingsController> logger,
-            IOptions<ConfigurationRequest> configOptions,
-            IStorageService storageService)
+            IOptions<AcsCommunicationSettings> configOptions)
         {
             _service = service ?? throw new ArgumentNullException(nameof(service));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _config = configOptions.Value ?? throw new ArgumentNullException(nameof(configOptions));
-            _storageService = storageService ?? throw new ArgumentNullException(nameof(storageService));
         }
 
         /// <summary>
@@ -51,8 +48,7 @@ namespace Call_Automation_GCCH.Controllers
             string recordingFormat = "Mp3",
             bool isMixed = true,
             bool isRecordingWithCallConnectionId = true,
-            bool isPauseOnStart = false,
-            bool isBlobStorage = false)
+            bool isPauseOnStart = false)
         {
             try
             {
@@ -106,33 +102,8 @@ namespace Call_Automation_GCCH.Controllers
                 recordingOptions.RecordingChannel = recordingChannel;
                 recordingOptions.RecordingStateCallbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks");
                 recordingOptions.PauseOnStart = isPauseOnStart;
-                
-                // Configure recording storage if blob storage is requested
-                if (isBlobStorage)
-                {
-                    var blobStorageConnectionString = _config.StorageConnectionString;
-                    var blobContainerName = _config.RecordingBlobStorageContainerName ?? "recordingbyos";
-                    
-                    // Create the container URL for blob storage
-                    var containerUrl = blobStorageConnectionString.Replace("DefaultEndpointsProtocol=https;", "https://")
-                                                                   .Replace("AccountName=", "")
-                                                                   .Replace("AccountKey=", "")
-                                                                   .Replace("EndpointSuffix=", "");
-                    
-                    // Extract account name from connection string to build proper URL
-                    var accountNameStart = blobStorageConnectionString.IndexOf("AccountName=") + "AccountName=".Length;
-                    var accountNameEnd = blobStorageConnectionString.IndexOf(";", accountNameStart);
-                    var accountName = blobStorageConnectionString.Substring(accountNameStart, accountNameEnd - accountNameStart);
-                    
-                    var endpointSuffixStart = blobStorageConnectionString.IndexOf("EndpointSuffix=") + "EndpointSuffix=".Length;
-                    var endpointSuffix = blobStorageConnectionString.Substring(endpointSuffixStart);
-                    
-                    var blobContainerUrl = $"https://{accountName}.blob.{endpointSuffix}/{blobContainerName}";
-                    
-                    recordingOptions.RecordingStorage = RecordingStorage.CreateAzureBlobContainerRecordingStorage(new Uri(blobContainerUrl));
-                }
-                
-                CallAutomationService.SetRecordingFileFormat(format.ToString());
+
+                _service.RecordingFileFormat = format.ToString();
 
                 var recordingResult = await _service.GetCallAutomationClient().GetCallRecording().StartAsync(recordingOptions);
                 var recordingId = recordingResult.Value.RecordingId;
@@ -172,8 +143,7 @@ namespace Call_Automation_GCCH.Controllers
             string recordingFormat = "Mp3",
             bool isMixed = true,
             bool isRecordingWithCallConnectionId = true,
-            bool isPauseOnStart = false,
-            bool isBlobStorage = false)
+            bool isPauseOnStart = false)
         {
             try
             {
@@ -227,27 +197,8 @@ namespace Call_Automation_GCCH.Controllers
                 recordingOptions.RecordingChannel = recordingChannel;
                 recordingOptions.RecordingStateCallbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks");
                 recordingOptions.PauseOnStart = isPauseOnStart;
-                
-                // Configure recording storage if blob storage is requested
-                if (isBlobStorage)
-                {
-                    var blobStorageConnectionString = _config.StorageConnectionString;
-                    var blobContainerName = _config.RecordingBlobStorageContainerName ?? "recordingbyos";
-                    
-                    // Extract account name from connection string to build proper URL
-                    var accountNameStart = blobStorageConnectionString.IndexOf("AccountName=") + "AccountName=".Length;
-                    var accountNameEnd = blobStorageConnectionString.IndexOf(";", accountNameStart);
-                    var accountName = blobStorageConnectionString.Substring(accountNameStart, accountNameEnd - accountNameStart);
-                    
-                    var endpointSuffixStart = blobStorageConnectionString.IndexOf("EndpointSuffix=") + "EndpointSuffix=".Length;
-                    var endpointSuffix = blobStorageConnectionString.Substring(endpointSuffixStart);
-                    
-                    var blobContainerUrl = $"https://{accountName}.blob.{endpointSuffix}/{blobContainerName}";
-                    
-                    recordingOptions.RecordingStorage = RecordingStorage.CreateAzureBlobContainerRecordingStorage(new Uri(blobContainerUrl));
-                }
-                
-                CallAutomationService.SetRecordingFileFormat(format.ToString());
+
+                _service.RecordingFileFormat = format.ToString();
 
                 var recordingResult = _service.GetCallAutomationClient().GetCallRecording().Start(recordingOptions);
                 var recordingId = recordingResult.Value.RecordingId;
@@ -475,7 +426,7 @@ namespace Call_Automation_GCCH.Controllers
         }
 
         /// <summary>
-        /// Downloads the recording to VM and uploads to storage account asynchronously
+        /// Downloads the recording to a local temp file asynchronously.
         /// </summary>
         [HttpPost("downloadRecordingAsync")]
         [Tags("Recording APIs")]
@@ -483,80 +434,43 @@ namespace Call_Automation_GCCH.Controllers
         {
             try
             {
-                var location = CallAutomationService.GetRecordingLocation();
-                var format = CallAutomationService.GetRecordingFileFormat();
+                var location = _service.RecordingLocation;
+                var format = _service.RecordingFileFormat;
 
                 if (string.IsNullOrEmpty(location))
-                {
-                    _logger.LogError($"Recording location is not available from the events. CallConnectionId: {callConnectionId}");
-                    return Problem("Recording Location from Azure Events is Null");
-                }
-
+                    return Problem("Recording location is not available from the events.");
                 if (string.IsNullOrEmpty(format))
-                {
-                    _logger.LogError($"Recording File Format is not available from the events. CallConnectionId: {callConnectionId}");
-                    return Problem("Recording File Format from Azure Events is Null");
-                }
-
-                if (string.IsNullOrEmpty(_config.StorageConnectionString))
-                {
-                    _logger.LogError($"Storage connection string is not configured. CallConnectionId: {callConnectionId}");
-                    return Problem("Storage account is not configured");
-                }
+                    return Problem("Recording file format is not available from the events.");
 
                 var correlationId = _service.GetCallConnectionProperties(callConnectionId).CorrelationId;
                 var date = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
                 var fileName = $"Recording_{callConnectionId}_{date}.{format}";
-                var mimeType = format.ToLower() switch
-                {
-                    "mp4" => "video/mp4",
-                    "wav" => "audio/wav",
-                    "mp3" => "audio/mpeg",
-                    _ => "application/octet-stream"
-                };
 
-                // Create local temporary directory for recordings
                 var tempDir = Path.Combine(Path.GetTempPath(), "call-recordings");
                 Directory.CreateDirectory(tempDir);
                 var localFilePath = Path.Combine(tempDir, fileName);
 
-                // Download recording to local VM storage first
                 using var fileStream = new FileStream(localFilePath, FileMode.Create, FileAccess.Write);
-                var recordingClient = _service.GetCallAutomationClient().GetCallRecording();
-                var downloadResult = await recordingClient.DownloadToAsync(new Uri(location), fileStream);
+                var downloadResult = await _service.GetCallAutomationClient().GetCallRecording().DownloadToAsync(new Uri(location), fileStream);
 
-                _logger.LogInformation($"Recording downloaded to VM. Path: {localFilePath}, CallConnectionId: {callConnectionId}, Status: {downloadResult.Status}");
-
-                // Upload to Azure Storage Account
-                using var uploadStream = new FileStream(localFilePath, FileMode.Open, FileAccess.Read);
-                var storageUrl = await _storageService.UploadRecordingAsync(fileName, uploadStream, mimeType);
-
-                // Clean up local file
-                if (System.IO.File.Exists(localFilePath))
-                {
-                    System.IO.File.Delete(localFilePath);
-                }
-
-                string successMessage = $"Recording downloaded and uploaded to storage. StorageUrl: {storageUrl}. CallConnectionId: {callConnectionId}, CorrelationId: {correlationId}";
-                _logger.LogInformation(successMessage);
+                _logger.LogInformation("Recording downloaded. Path={Path}, Status={Status}", localFilePath, downloadResult.Status);
 
                 return Ok(new CallConnectionResponse
                 {
                     CallConnectionId = callConnectionId,
                     CorrelationId = correlationId,
-                    Status = $"Recording downloaded and uploaded to storage. StorageUrl: {storageUrl}"
+                    Status = $"Recording downloaded. Path: {localFilePath}, Status: {downloadResult.Status}"
                 });
             }
             catch (Exception ex)
             {
-                string errorMessage = $"Error downloading and uploading recording: {ex.Message}. CallConnectionId: {callConnectionId}";
-                _logger.LogError(errorMessage);
-                return Problem($"Failed to download and upload recording: {ex.Message}. CallConnectionId: {callConnectionId}");
+                _logger.LogError(ex, "Error downloading recording. CallConnectionId={CallConnectionId}", callConnectionId);
+                return Problem($"Failed to download recording: {ex.Message}");
             }
         }
 
         /// <summary>
-        /// Downloads the recording to VM and uploads to storage account synchronously
+        /// Downloads the recording to a local temp file synchronously.
         /// </summary>
         [HttpPost("downloadRecording")]
         [Tags("Recording APIs")]
@@ -564,75 +478,140 @@ namespace Call_Automation_GCCH.Controllers
         {
             try
             {
-                var location = CallAutomationService.GetRecordingLocation();
-                var format = CallAutomationService.GetRecordingFileFormat();
+                var location = _service.RecordingLocation;
+                var format = _service.RecordingFileFormat;
 
                 if (string.IsNullOrEmpty(location))
-                {
-                    _logger.LogError($"Recording location is not available from the events. CallConnectionId: {callConnectionId}");
-                    return Problem("Recording Location from Azure Events is Null");
-                }
-
+                    return Problem("Recording location is not available from the events.");
                 if (string.IsNullOrEmpty(format))
-                {
-                    _logger.LogError($"Recording File Format is not available from the events. CallConnectionId: {callConnectionId}");
-                    return Problem("Recording File Format from Azure Events is Null");
-                }
-
-                if (string.IsNullOrEmpty(_config.StorageConnectionString))
-                {
-                    _logger.LogError($"Storage connection string is not configured. CallConnectionId: {callConnectionId}");
-                    return Problem("Storage account is not configured");
-                }
+                    return Problem("Recording file format is not available from the events.");
 
                 var correlationId = _service.GetCallConnectionProperties(callConnectionId).CorrelationId;
                 var date = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
                 var fileName = $"Recording_{callConnectionId}_{date}.{format}";
-                var mimeType = format.ToLower() switch
-                {
-                    "mp4" => "video/mp4",
-                    "wav" => "audio/wav",
-                    "mp3" => "audio/mpeg",
-                    _ => "application/octet-stream"
-                };
 
-                // Create local temporary directory for recordings
                 var tempDir = Path.Combine(Path.GetTempPath(), "call-recordings");
                 Directory.CreateDirectory(tempDir);
                 var localFilePath = Path.Combine(tempDir, fileName);
 
-                // Download recording to local VM storage first
                 using var fileStream = new FileStream(localFilePath, FileMode.Create, FileAccess.Write);
-                var recordingClient = _service.GetCallAutomationClient().GetCallRecording();
-                var downloadResult = recordingClient.DownloadTo(new Uri(location), fileStream);
+                var downloadResult = _service.GetCallAutomationClient().GetCallRecording().DownloadTo(new Uri(location), fileStream);
 
-                _logger.LogInformation($"Recording downloaded to VM. Path: {localFilePath}, CallConnectionId: {callConnectionId}, Status: {downloadResult.Status}");
-
-                // Upload to Azure Storage Account
-                using var uploadStream = new FileStream(localFilePath, FileMode.Open, FileAccess.Read);
-                var storageUrl = _storageService.UploadRecording(fileName, uploadStream, mimeType);
-
-                // Clean up local file
-                if (System.IO.File.Exists(localFilePath))
-                {
-                    System.IO.File.Delete(localFilePath);
-                }
-
-                string successMessage = $"Recording downloaded and uploaded to storage. StorageUrl: {storageUrl}. CallConnectionId: {callConnectionId}, CorrelationId: {correlationId}";
-                _logger.LogInformation(successMessage);
+                _logger.LogInformation("Recording downloaded. Path={Path}, Status={Status}", localFilePath, downloadResult.Status);
 
                 return Ok(new CallConnectionResponse
                 {
                     CallConnectionId = callConnectionId,
                     CorrelationId = correlationId,
-                    Status = $"Recording downloaded and uploaded to storage. StorageUrl: {storageUrl}"
+                    Status = $"Recording downloaded. Path: {localFilePath}, Status: {downloadResult.Status}"
                 });
             }
             catch (Exception ex)
             {
-                string errorMessage = $"Error downloading and uploading recording: {ex.Message}. CallConnectionId: {callConnectionId}";
-                _logger.LogError(errorMessage);
-                return Problem($"Failed to download and upload recording: {ex.Message}. CallConnectionId: {callConnectionId}");
+                _logger.LogError(ex, "Error downloading recording. CallConnectionId={CallConnectionId}", callConnectionId);
+                return Problem($"Failed to download recording: {ex.Message}");
+            }
+        }
+
+        // ──────────── GET RECORDING STATE ──────────────────────────────────────────
+
+        [HttpGet("getRecordingStateAsync")]
+        [Tags("Recording APIs")]
+        public async Task<IActionResult> GetRecordingStateAsync(string recordingId)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(recordingId))
+                    return BadRequest("RecordingId is required");
+
+                var result = await _service.GetCallAutomationClient().GetCallRecording().GetStateAsync(recordingId);
+
+                _logger.LogInformation($"Recording state retrieved. RecordingId: {recordingId}, Status: {result.Value.RecordingState}");
+
+                return Ok(new
+                {
+                    RecordingId = recordingId,
+                    RecordingState = result.Value.RecordingState?.ToString(),
+                    Status = result.GetRawResponse().Status.ToString()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting recording state. RecordingId: {RecordingId}", recordingId);
+                return Problem($"Failed to get recording state: {ex.Message}");
+            }
+        }
+
+        [HttpGet("getRecordingState")]
+        [Tags("Recording APIs")]
+        public IActionResult GetRecordingState(string recordingId)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(recordingId))
+                    return BadRequest("RecordingId is required");
+
+                var result = _service.GetCallAutomationClient().GetCallRecording().GetState(recordingId);
+
+                _logger.LogInformation($"Recording state retrieved. RecordingId: {recordingId}, Status: {result.Value.RecordingState}");
+
+                return Ok(new
+                {
+                    RecordingId = recordingId,
+                    RecordingState = result.Value.RecordingState?.ToString(),
+                    Status = result.GetRawResponse().Status.ToString()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting recording state. RecordingId: {RecordingId}", recordingId);
+                return Problem($"Failed to get recording state: {ex.Message}");
+            }
+        }
+
+        // ──────────── DELETE RECORDING ─────────────────────────────────────────────
+
+        [HttpDelete("deleteRecordingAsync")]
+        [Tags("Recording APIs")]
+        public async Task<IActionResult> DeleteRecordingAsync(string recordingLocation)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(recordingLocation))
+                    return BadRequest("Recording location URL is required");
+
+                var result = await _service.GetCallAutomationClient().GetCallRecording().DeleteAsync(new Uri(recordingLocation));
+
+                _logger.LogInformation($"Recording deleted. Location: {recordingLocation}, Status: {result.Status}");
+
+                return Ok(new { RecordingLocation = recordingLocation, Status = result.Status.ToString() });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting recording. Location: {RecordingLocation}", recordingLocation);
+                return Problem($"Failed to delete recording: {ex.Message}");
+            }
+        }
+
+        [HttpDelete("deleteRecording")]
+        [Tags("Recording APIs")]
+        public IActionResult DeleteRecording(string recordingLocation)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(recordingLocation))
+                    return BadRequest("Recording location URL is required");
+
+                var result = _service.GetCallAutomationClient().GetCallRecording().Delete(new Uri(recordingLocation));
+
+                _logger.LogInformation($"Recording deleted. Location: {recordingLocation}, Status: {result.Status}");
+
+                return Ok(new { RecordingLocation = recordingLocation, Status = result.Status.ToString() });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting recording. Location: {RecordingLocation}", recordingLocation);
+                return Problem($"Failed to delete recording: {ex.Message}");
             }
         }
     }
