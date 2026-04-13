@@ -12,6 +12,42 @@ using CallAutomationOpenAI;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
 
+// CLI mode: encode/decode GUID URL strings and exit
+if (args.Length >= 2 && args[0].Equals("decode", StringComparison.OrdinalIgnoreCase))
+{
+    var encoded = args[1];
+    try
+    {
+        var bytes = Convert.FromBase64String(encoded
+                        .Replace('_', '/')
+                        .Replace('-', '+')
+                        .PadRight((encoded.Length + 3) & ~3, '='));
+        Console.WriteLine(BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant());
+        if (bytes.Length == 16)
+        {
+            Console.WriteLine(new Guid(bytes));
+        }
+    }
+    catch (FormatException)
+    {
+        Console.Error.WriteLine($"Failed to decode '{encoded}': invalid base64.");
+    }
+    return;
+}
+
+if (args.Length >= 2 && args[0].Equals("encode", StringComparison.OrdinalIgnoreCase))
+{
+    if (Guid.TryParse(args[1], out var guid))
+    {
+        Console.WriteLine(guid.ToEncodedUrlString());
+    }
+    else
+    {
+        Console.Error.WriteLine($"Failed to parse '{args[1]}' as a GUID.");
+    }
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Log unhandled exceptions to stdout for App Service diagnostics
@@ -219,8 +255,12 @@ app.MapPost("/api/incomingCall", async (
             }
 
             var jsonObject = Helper.GetJsonObject(eventGridEvent.Data);
+            logger.LogInformation("Incoming call JSON: {Json}", jsonObject.ToJsonString());
             var callerId = Helper.GetCallerId(jsonObject);
             var incomingCallContext = Helper.GetIncomingCallContext(jsonObject);
+            var serverCallId = Helper.GetServerCallId(jsonObject);
+            var mediaSessionId = Helper.ExtractMediaSessionId(serverCallId);
+            logger.LogInformation("ServerCallId: {ServerCallId}, MediaSessionId: {MediaSessionId}", serverCallId, mediaSessionId);
             var callbackUri = new Uri(new Uri(appBaseUrl), $"/api/callbacks/{Guid.NewGuid()}?callerId={callerId}");
             logger.LogInformation("Callback Url: {CallbackUri}", callbackUri);
             var websocketUri = appBaseUrl.TrimEnd('/').Replace("https", "wss") + "/ws";
@@ -252,7 +292,7 @@ app.MapPost("/api/incomingCall", async (
             var roomConnector = new TestCallRoomConnector(mc, logger, app.Services);
             session.RoomConnector = roomConnector;
 
-            var connected = await roomConnector.ConnectAsync(correlationId);
+            var connected = await roomConnector.ConnectAsync(mediaSessionId);
             if (connected)
             {
                 logger.LogInformation("MediaSDK connected for call {Id}", correlationId);
