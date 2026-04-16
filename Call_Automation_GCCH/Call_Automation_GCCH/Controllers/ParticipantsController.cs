@@ -31,345 +31,174 @@ namespace Call_Automation_GCCH.Controllers
             _config = configOptions.Value ?? throw new ArgumentNullException(nameof(configOptions));
         }
 
-        // ─ Add ───────────────────────────────────────────────────────────────────────
+        // - Add -----------------------------------------------------------------------
 
-        /// <summary>
-        /// Adds a participant to an active call.
-        /// </summary>
-        /// <param name="callConnectionId">The call connection ID</param>
-        /// <param name="participantId">ACS user ID (8:...) or phone number (+...)</param>
-        /// <param name="isPstn">True if participant is a PSTN number</param>
-        /// <param name="invitationTimeoutInSeconds">Seconds to wait before the invitation times out</param>
-        /// <param name="operationContext">Custom context string for correlating events</param>
-        [HttpPost("addParticipant")]
-        [Tags("Add/Remove Participant APIs")]
-        public IActionResult AddParticipant(
-            string callConnectionId,
-            string participantId,
-            bool isPstn = false,
-            int invitationTimeoutInSeconds = 30,
-            string operationContext = "addParticipantContext")
-            => HandleAddParticipant(callConnectionId, participantId, isPstn, invitationTimeoutInSeconds, operationContext, async: false).Result;
-
+        /// <summary>Adds a participant to an active call.</summary>
         [HttpPost("addParticipantAsync")]
         [Tags("Add/Remove Participant APIs")]
-        public Task<IActionResult> AddParticipantAsync(
-            string callConnectionId,
-            string participantId,
-            bool isPstn = false,
-            int invitationTimeoutInSeconds = 30,
-            string operationContext = "addParticipantContext")
-            => HandleAddParticipant(callConnectionId, participantId, isPstn, invitationTimeoutInSeconds, operationContext, async: true);
-
-        // ─ Remove ────────────────────────────────────────────────────────────────────
-
-        [HttpPost("removeParticipant")]
+        public Task<IActionResult> AddParticipantAsync([FromBody] AddParticipantRequest request)
+            => HandleAddParticipant(request, async: true);
+        [HttpPost("addParticipant")]
         [Tags("Add/Remove Participant APIs")]
-        public IActionResult RemoveParticipant(
-            string callConnectionId,
-            string participantId,
-            bool isPstn = false,
-            string operationContext = "removeParticipantContext")
-            => HandleRemoveParticipant(callConnectionId, participantId, isPstn, operationContext, async: false).Result;
+        public IActionResult AddParticipant([FromBody] AddParticipantRequest request)
+            => HandleAddParticipant(request, async: false).Result;
 
+        /// <summary>Removes a participant from a call.</summary>
         [HttpPost("removeParticipantAsync")]
         [Tags("Add/Remove Participant APIs")]
-        public Task<IActionResult> RemoveParticipantAsync(
-            string callConnectionId,
-            string participantId,
-            bool isPstn = false,
-            string operationContext = "removeParticipantContext")
-            => HandleRemoveParticipant(callConnectionId, participantId, isPstn, operationContext, async: true);
+        public Task<IActionResult> RemoveParticipantAsync([FromBody] RemoveParticipantRequest request)
+            => HandleRemoveParticipant(request, async: true);
+        [HttpPost("removeParticipant")]
+        [Tags("Add/Remove Participant APIs")]
+        public IActionResult RemoveParticipant([FromBody] RemoveParticipantRequest request)
+            => HandleRemoveParticipant(request, async: false).Result;
 
-        // ─ Get ───────────────────────────────────────────────────────────────────────
-
-        [HttpGet("getParticipant")]
+        /// <summary>Gets a specific participant's details.</summary>
+        [HttpPost("getParticipantAsync")]
         [Tags("Get Participant APIs")]
-        public IActionResult GetParticipant(
-            string callConnectionId,
-            string participantId,
-            bool isPstn = false)
-            => HandleGetParticipant(callConnectionId, participantId, isPstn, async: false).Result;
-
-        [HttpGet("getParticipantAsync")]
+        public Task<IActionResult> GetParticipantAsync([FromBody] ParticipantIdentifierRequest request)
+            => HandleGetParticipant(request, async: true);
+        [HttpPost("getParticipant")]
         [Tags("Get Participant APIs")]
-        public Task<IActionResult> GetParticipantAsync(
-            string callConnectionId,
-            string participantId,
-            bool isPstn = false)
-            => HandleGetParticipant(callConnectionId, participantId, isPstn, async: true);
+        public IActionResult GetParticipant([FromBody] ParticipantIdentifierRequest request)
+            => HandleGetParticipant(request, async: false).Result;
 
-        // ─ Mute ──────────────────────────────────────────────────────────────────────
-
-        [HttpPost("muteParticipant")]
-        [Tags("Mute Participant APIs")]
-        public IActionResult MuteParticipant(
-            string callConnectionId,
-            string participantId,
-            bool isPstn = false)
-            => HandleMuteParticipant(callConnectionId, participantId, isPstn, async: false).Result;
-
+        /// <summary>Mutes a participant.</summary>
         [HttpPost("muteParticipantAsync")]
         [Tags("Mute Participant APIs")]
-        public Task<IActionResult> MuteParticipantAsync(
-            string callConnectionId,
-            string participantId,
-            bool isPstn = false)
-            => HandleMuteParticipant(callConnectionId, participantId, isPstn, async: true);
+        public Task<IActionResult> MuteParticipantAsync([FromBody] ParticipantIdentifierRequest request)
+            => HandleMuteParticipant(request, async: true);
+        [HttpPost("muteParticipant")]
+        [Tags("Mute Participant APIs")]
+        public IActionResult MuteParticipant([FromBody] ParticipantIdentifierRequest request)
+            => HandleMuteParticipant(request, async: false).Result;
 
-        // ─ Get All Participants ──────────────────────────────────────────────────────
-
+        /// <summary>Gets all participants in a call.</summary>
+        [HttpGet("getParticipantsAsync")]
+        [Tags("Get Participant APIs")]
+        public Task<IActionResult> GetParticipantsAsync(string callConnectionId)
+            => HandleGetAllParticipants(callConnectionId, async: true);
         [HttpGet("getParticipants")]
         [Tags("Get Participant APIs")]
         public IActionResult GetParticipants(string callConnectionId)
             => HandleGetAllParticipants(callConnectionId, async: false).Result;
 
-        [HttpGet("getParticipantsAsync")]
-        [Tags("Get Participant APIs")]
-        public Task<IActionResult> GetParticipantsAsync(string callConnectionId)
-            => HandleGetAllParticipants(callConnectionId, async: true);
-
-        // ─ Cancel Add Participant ────────────────────────────────────────────────────
-
-        [HttpPost("cancelAddParticipant")]
-        [Tags("Add/Remove Participant APIs")]
-        public IActionResult CancelAddParticipant(
-            string callConnectionId,
-            string invitationId,
-            string operationContext = "cancelAddParticipantContext")
-            => HandleCancelAddParticipant(callConnectionId, invitationId, operationContext, async: false).Result;
-
+        /// <summary>Cancels a pending add-participant invitation.</summary>
         [HttpPost("cancelAddParticipantAsync")]
         [Tags("Add/Remove Participant APIs")]
-        public Task<IActionResult> CancelAddParticipantAsync(
-            string callConnectionId,
-            string invitationId,
-            string operationContext = "cancelAddParticipantContext")
-            => HandleCancelAddParticipant(callConnectionId, invitationId, operationContext, async: true);
+        public Task<IActionResult> CancelAddParticipantAsync([FromBody] CancelAddParticipantRequest request)
+            => HandleCancelAddParticipant(request, async: true);
+        [HttpPost("cancelAddParticipant")]
+        [Tags("Add/Remove Participant APIs")]
+        public IActionResult CancelAddParticipant([FromBody] CancelAddParticipantRequest request)
+            => HandleCancelAddParticipant(request, async: false).Result;
 
-        // ─────────────── Shared Handlers ────────────────────────────────────────────
+        // --------------- Shared Handlers --------------------------------------------
 
-        private async Task<IActionResult> HandleAddParticipant(
-            string callConnectionId,
-            string participantId,
-            bool isPstn,
-            int invitationTimeoutInSeconds,
-            string operationContext,
-            bool async)
+        private async Task<IActionResult> HandleAddParticipant(AddParticipantRequest request, bool async)
         {
-            var opName = isPstn ? "PSTN" : "ACS";
-            _logger.LogInformation("Adding {OpName} participant {ParticipantId} to call {CallId}, Timeout={Timeout}s",
-                opName, participantId, callConnectionId, invitationTimeoutInSeconds);
-
+            var opName = request.IsPstn ? "PSTN" : "ACS";
+            _logger.LogInformation("Adding {OpName} participant {ParticipantId} to call {CallId}", opName, request.ParticipantId, request.CallConnectionId);
             try
             {
-                var props = _service.GetCallConnectionProperties(callConnectionId);
-                var connection = _service.GetCallConnection(callConnectionId);
+                var props = _service.GetCallConnectionProperties(request.CallConnectionId);
+                var connection = _service.GetCallConnection(request.CallConnectionId);
 
-                CallInvite invite = isPstn
-                    ? new CallInvite(
-                          new PhoneNumberIdentifier(participantId),
-                          new PhoneNumberIdentifier(_config.AcsPhoneNumber))
-                    : new CallInvite(new CommunicationUserIdentifier(participantId));
+                CallInvite invite = request.IsPstn
+                    ? new CallInvite(new PhoneNumberIdentifier(request.ParticipantId), new PhoneNumberIdentifier(_config.AcsPhoneNumber))
+                    : new CallInvite(new CommunicationUserIdentifier(request.ParticipantId));
 
                 var options = new AddParticipantOptions(invite)
-                {
-                    OperationContext = operationContext,
-                    InvitationTimeoutInSeconds = invitationTimeoutInSeconds
-                };
+                { OperationContext = request.OperationContext, InvitationTimeoutInSeconds = request.InvitationTimeoutInSeconds };
 
-                Response<AddParticipantResult> result = async
-                    ? await connection.AddParticipantAsync(options)
-                    : connection.AddParticipant(options);
-
-                _logger.LogInformation(
-                    $"{opName} participant added: Call={callConnectionId}, CorrId={props.CorrelationId}, " +
-                    $"Status={result.GetRawResponse().Status}, InviteId={result.Value.InvitationId}");
+                Response<AddParticipantResult> result = async ? await connection.AddParticipantAsync(options) : connection.AddParticipant(options);
 
                 return Ok(new CallConnectionResponse
                 {
-                    CallConnectionId = callConnectionId,
+                    CallConnectionId = request.CallConnectionId,
                     CorrelationId = props.CorrelationId,
                     Status = $"{result.GetRawResponse().Status}; InviteId={result.Value.InvitationId}"
                 });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Error adding {opName} participant");
-                return Problem($"Failed to add participant: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error adding participant"); return Problem($"Failed to add participant: {ex.Message}"); }
         }
 
-        private async Task<IActionResult> HandleRemoveParticipant(
-            string callConnectionId,
-            string participantId,
-            bool isPstn,
-            string operationContext,
-            bool async)
+        private async Task<IActionResult> HandleRemoveParticipant(RemoveParticipantRequest request, bool async)
         {
-            var opName = isPstn ? "PSTN" : "ACS";
-            _logger.LogInformation("Removing {OpName} participant {ParticipantId} from call {CallId}",
-                opName, participantId, callConnectionId);
-
+            _logger.LogInformation("Removing participant {Id} from call {CallId}", request.ParticipantId, request.CallConnectionId);
             try
             {
-                var props = _service.GetCallConnectionProperties(callConnectionId);
-                var connection = _service.GetCallConnection(callConnectionId);
+                var props = _service.GetCallConnectionProperties(request.CallConnectionId);
+                var connection = _service.GetCallConnection(request.CallConnectionId);
+                var target = request.IsPstn
+                    ? (CommunicationIdentifier)new PhoneNumberIdentifier(request.ParticipantId)
+                    : new CommunicationUserIdentifier(request.ParticipantId);
+                var options = new RemoveParticipantOptions(target) { OperationContext = request.OperationContext };
 
-                var target = isPstn
-                    ? (CommunicationIdentifier)new PhoneNumberIdentifier(participantId)
-                    : new CommunicationUserIdentifier(participantId);
+                Response<RemoveParticipantResult> result = async ? await connection.RemoveParticipantAsync(options) : connection.RemoveParticipant(options);
 
-                var options = new RemoveParticipantOptions(target)
-                {
-                    OperationContext = operationContext
-                };
-
-                Response<RemoveParticipantResult> result = async
-                     ? await connection.RemoveParticipantAsync(options)
-                     : connection.RemoveParticipant(options);
-
-                _logger.LogInformation(
-                    $"{opName} participant removed: Call={callConnectionId}, CorrId={props.CorrelationId}, " +
-                    $"Status={result.GetRawResponse().Status}");
-
-                return Ok(new CallConnectionResponse
-                {
-                    CallConnectionId = callConnectionId,
-                    CorrelationId = props.CorrelationId,
-                    Status = $"{result.GetRawResponse().Status}"
-                });
+                return Ok(new CallConnectionResponse { CallConnectionId = request.CallConnectionId, CorrelationId = props.CorrelationId, Status = $"{result.GetRawResponse().Status}" });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Error removing {opName} participant");
-                return Problem($"Failed to remove participant: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error removing participant"); return Problem($"Failed to remove participant: {ex.Message}"); }
         }
 
-        private async Task<IActionResult> HandleGetParticipant(
-            string callConnectionId,
-            string participantId,
-            bool isPstn,
-            bool async)
+        private async Task<IActionResult> HandleGetParticipant(ParticipantIdentifierRequest request, bool async)
         {
-            var opName = isPstn ? "PSTN" : "ACS";
-            _logger.LogInformation($"Starting to get {opName} participant: {participantId} for call {callConnectionId}");
-
+            _logger.LogInformation("Getting participant {Id} for call {CallId}", request.ParticipantId, request.CallConnectionId);
             try
             {
-                var props = _service.GetCallConnectionProperties(callConnectionId);
-                var connection = _service.GetCallConnection(callConnectionId);
+                var props = _service.GetCallConnectionProperties(request.CallConnectionId);
+                var connection = _service.GetCallConnection(request.CallConnectionId);
+                var id = request.IsPstn
+                    ? (CommunicationIdentifier)new PhoneNumberIdentifier(request.ParticipantId)
+                    : new CommunicationUserIdentifier(request.ParticipantId);
 
-                CallParticipant participant = async
-                    ? await connection.GetParticipantAsync(
-                          isPstn
-                            ? (CommunicationIdentifier)new PhoneNumberIdentifier(participantId)
-                            : new CommunicationUserIdentifier(participantId))
-                    : connection.GetParticipant(
-                          isPstn
-                            ? (CommunicationIdentifier)new PhoneNumberIdentifier(participantId)
-                            : new CommunicationUserIdentifier(participantId));
+                CallParticipant participant = async ? await connection.GetParticipantAsync(id) : connection.GetParticipant(id);
 
                 if (participant == null)
-                    return NotFound(new { callConnectionId, correlationId = props.CorrelationId, Message = "Not found" });
+                    return NotFound(new { request.CallConnectionId, correlationId = props.CorrelationId, Message = "Not found" });
 
-                return Ok(new
-                {
-                    CallConnectionId = callConnectionId,
-                    CorrelationId = props.CorrelationId,
-                    Participant = new
-                    {
-                        RawId = participant.Identifier.RawId,
-                        IsOnHold = participant.IsOnHold,
-                        IsMuted = participant.IsMuted
-                    }
-                });
+                return Ok(new { CallConnectionId = request.CallConnectionId, CorrelationId = props.CorrelationId,
+                    Participant = new { RawId = participant.Identifier.RawId, IsOnHold = participant.IsOnHold, IsMuted = participant.IsMuted } });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Error getting {opName} participant");
-                return Problem($"Failed to get participant: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error getting participant"); return Problem($"Failed to get participant: {ex.Message}"); }
         }
 
-        private async Task<IActionResult> HandleMuteParticipant(
-            string callConnectionId,
-            string participantId,
-            bool isPstn,
-            bool async)
+        private async Task<IActionResult> HandleMuteParticipant(ParticipantIdentifierRequest request, bool async)
         {
-            var opName = isPstn ? "PSTN" : "ACS";
-            _logger.LogInformation($"Starting to mute {opName} participant: {participantId} for call {callConnectionId}");
+            _logger.LogInformation("Muting participant {Id} on call {CallId}", request.ParticipantId, request.CallConnectionId);
+            try
+            {
+                var props = _service.GetCallConnectionProperties(request.CallConnectionId);
+                var connection = _service.GetCallConnection(request.CallConnectionId);
+                var target = request.IsPstn
+                    ? (CommunicationIdentifier)new PhoneNumberIdentifier(request.ParticipantId)
+                    : new CommunicationUserIdentifier(request.ParticipantId);
 
+                Response<MuteParticipantResult> result = async ? await connection.MuteParticipantAsync(target) : connection.MuteParticipant(target);
+
+                return Ok(new CallConnectionResponse { CallConnectionId = request.CallConnectionId, CorrelationId = props.CorrelationId, Status = $"{result.GetRawResponse().Status}" });
+            }
+            catch (Exception ex) { _logger.LogError(ex, "Error muting participant"); return Problem($"Failed to mute participant: {ex.Message}"); }
+        }
+
+        private async Task<IActionResult> HandleGetAllParticipants(string callConnectionId, bool async)
+        {
+            _logger.LogInformation("Getting all participants for call {CallId}", callConnectionId);
             try
             {
                 var props = _service.GetCallConnectionProperties(callConnectionId);
                 var connection = _service.GetCallConnection(callConnectionId);
+                var response = async ? await connection.GetParticipantsAsync() : connection.GetParticipants();
 
-                var target = isPstn
-                    ? (CommunicationIdentifier)new PhoneNumberIdentifier(participantId)
-                    : new CommunicationUserIdentifier(participantId);
-
-                Response<MuteParticipantResult> result = async
-                    ? await connection.MuteParticipantAsync(target)
-                    : connection.MuteParticipant(target);
-
-                _logger.LogInformation(
-                    $"{opName} participant muted: Call={callConnectionId}, CorrId={props.CorrelationId}, " +
-                    $"Status={result.GetRawResponse().Status}");
-
-                return Ok(new CallConnectionResponse
-                {
-                    CallConnectionId = callConnectionId,
-                    CorrelationId = props.CorrelationId,
-                    Status = $"{result.GetRawResponse().Status}"
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Error muting {opName} participant");
-                return Problem($"Failed to mute participant: {ex.Message}");
-            }
-        }
-
-        private async Task<IActionResult> HandleGetAllParticipants(
-            string callConnectionId,
-            bool async)
-        {
-            _logger.LogInformation($"Getting all participants for call {callConnectionId}");
-
-            try
-            {
-                var props = _service.GetCallConnectionProperties(callConnectionId);
-                var connection = _service.GetCallConnection(callConnectionId);
-
-                IReadOnlyList<CallParticipant> participantList;
-
-                if (async)
-                {
-                    var response = await connection.GetParticipantsAsync();
-                    participantList = response.Value;
-                }
-                else
-                {
-                    var response = connection.GetParticipants();
-                    participantList = response.Value;
-                }
-
-                var participants = participantList.Select(p => new
+                var participants = response.Value.Select(p => new
                 {
                     RawId = p.Identifier.RawId,
                     IsOnHold = p.IsOnHold,
                     IsMuted = p.IsMuted
                 }).ToList();
 
-                return Ok(new
-                {
-                    CallConnectionId = callConnectionId,
-                    CorrelationId = props.CorrelationId,
-                    Participants = participants
-                });
+                return Ok(new { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Participants = participants });
             }
             catch (Exception ex)
             {
@@ -378,49 +207,26 @@ namespace Call_Automation_GCCH.Controllers
             }
         }
 
-        private async Task<IActionResult> HandleCancelAddParticipant(
-            string callConnectionId,
-            string invitationId,
-            string operationContext,
-            bool async)
+        private async Task<IActionResult> HandleCancelAddParticipant(CancelAddParticipantRequest request, bool async)
         {
-            if (string.IsNullOrEmpty(callConnectionId))
+            if (string.IsNullOrEmpty(request.CallConnectionId))
                 return BadRequest("callConnectionId is required");
-            if (string.IsNullOrEmpty(invitationId))
+            if (string.IsNullOrEmpty(request.InvitationId))
                 return BadRequest("invitationId is required");
 
-            _logger.LogInformation("Cancelling add participant. CallId={CallId}, InvitationId={InvitationId}", callConnectionId, invitationId);
-
+            _logger.LogInformation("Cancelling add participant. CallId={CallId}, InvitationId={InvitationId}", request.CallConnectionId, request.InvitationId);
             try
             {
-                var props = _service.GetCallConnectionProperties(callConnectionId);
-                var connection = _service.GetCallConnection(callConnectionId);
+                var props = _service.GetCallConnectionProperties(request.CallConnectionId);
+                var connection = _service.GetCallConnection(request.CallConnectionId);
+                var options = new CancelAddParticipantOperationOptions(request.InvitationId) { OperationContext = request.OperationContext };
 
-                var options = new CancelAddParticipantOperationOptions(invitationId)
-                {
-                    OperationContext = operationContext
-                };
-
-                var result = async
-                    ? await connection.CancelAddParticipantOperationAsync(options)
-                    : connection.CancelAddParticipantOperation(options);
-
-                _logger.LogInformation(
-                    $"Cancel add participant succeeded: Call={callConnectionId}, CorrId={props.CorrelationId}, " +
-                    $"Status={result.GetRawResponse().Status}");
+                var result = async ? await connection.CancelAddParticipantOperationAsync(options) : connection.CancelAddParticipantOperation(options);
 
                 return Ok(new CallConnectionResponse
-                {
-                    CallConnectionId = callConnectionId,
-                    CorrelationId = props.CorrelationId,
-                    Status = result.GetRawResponse().Status.ToString()
-                });
+                { CallConnectionId = request.CallConnectionId, CorrelationId = props.CorrelationId, Status = result.GetRawResponse().Status.ToString() });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error cancelling add participant");
-                return Problem($"Failed to cancel add participant: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error cancelling add participant"); return Problem($"Failed to cancel add participant: {ex.Message}"); }
         }
     }
 }

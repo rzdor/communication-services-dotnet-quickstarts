@@ -1,16 +1,78 @@
-Install Git Bash 
+================================================================================
+  DEPLOYMENT INSTRUCTIONS — Call Automation GCCH
+  Target: gcch-contoso-app VM (Azure US Government Cloud)
+================================================================================
 
-Open Git Bash
+ARCHITECTURE
+????????????
+The app runs as Kestrel on port 80 (no IIS required).
+A scheduled task auto-starts the app on VM reboot.
+.NET 8 ASP.NET Core Hosting Bundle is installed on the VM.
 
-Navigate to deployment file location
+APP URL
+???????
+https://gcch-contoso-app.usgovtexas.cloudapp.usgovcloudapi.net/swagger
 
-<Drive>:/<Drive>/Call_Automation_GCCH/Call_Automation_GCCH
+NOTE: The app uses a self-signed SSL certificate. Your browser will show a
+certificate warning — click "Advanced" > "Proceed" to access the page.
+HTTP also works: http://gcch-contoso-app.usgovtexas.cloudapp.usgovcloudapi.net/swagger
 
-Execute following command to create executable.
-chmod +x gcchDeploy.sh
 
-Execute following command to deploy
-./gcchDeploy.sh
+DEPLOY USING POWERSHELL
+???????????????????????
+1. Open PowerShell as Administrator
 
-https://<app-name>.scm.azurewebsites.net/swagger/index.html
+2. Navigate to the project directory:
+     cd "D:\QuickStarts\communication-services-dotnet-quickstarts\Call_Automation_GCCH\Call_Automation_GCCH"
 
+3. Run the deployment script:
+     .\DeploymentScript.ps1
+
+4. Follow the device authentication prompt for Azure US Government login.
+
+5. The script will:
+   - Publish the .NET 8 app (framework-dependent)
+   - ZIP and upload to the VM in chunks
+   - Extract to C:\app\CallAutomation
+   - Start Kestrel on port 80
+   - Open Windows Firewall port 80
+   - Ensure Azure NSG allows port 80 inbound
+   - Register a scheduled task for auto-start on reboot
+
+6. The final URL is printed at the end of the script.
+
+
+FIRST-TIME SETUP AFTER DEPLOYMENT
+??????????????????????????????????
+1. Open the Swagger UI at the app URL above
+
+2. Expand "1. Configuration" section (appears first)
+
+3. Use POST /api/configuration/set to provide:
+   - acsConnectionString — your ACS connection string
+   - pmaEndpoint — PMA endpoint URL (if applicable)
+   - callbackUriHost — your public callback URL
+   - acsPhoneNumber — your ACS phone number
+
+4. You are now ready to use all Call Automation APIs.
+
+
+TROUBLESHOOTING
+???????????????
+If the URL doesn't load:
+
+1. Check the app is running on the VM:
+   - Azure Portal > gcch-contoso-app > Run Command
+   - Run: Get-Process dotnet
+
+2. If not running, start manually:
+   - Run: schtasks /run /tn "CallAutomationGCCH"
+
+3. Check logs on the VM at: C:\app\CallAutomation\logs\
+
+4. Verify NSG port 80 is open:
+   - Azure Portal > gcch-contoso-app-nsg > Inbound rules
+   - Ensure an Allow rule exists for port 80
+
+5. Verify Windows Firewall:
+   - Run on VM: netsh advfirewall firewall show rule name="CallAutomation HTTP"

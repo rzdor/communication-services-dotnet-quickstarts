@@ -28,85 +28,72 @@ namespace Call_Automation_GCCH.Controllers
             _config = configOptions.Value ?? throw new ArgumentNullException(nameof(configOptions));
         }
 
-        // ──────────── CONNECT TO SERVER CALL ───────────────────────────────────────
-
         /// <summary>
         /// Connects to an existing server call with optional media streaming and transcription.
+        /// Include "transcriptionOptions" to enable transcription.
+        /// Include "mediaStreamingOptions" to enable media streaming.
+        /// Omit either object to disable that feature.
         /// </summary>
-        /// <param name="serverCallId">The server call ID to connect to</param>
-        /// <param name="enableMediaStreaming">Whether to enable media streaming on connect</param>
-        /// <param name="isMixedAudio">True for mixed audio channel, false for unmixed</param>
-        /// <param name="enableTranscription">Whether to enable transcription on connect</param>
-        /// <param name="transcriptionLocale">Transcription locale (e.g. en-US, es-ES)</param>
-        /// <param name="operationContext">Custom context string for correlating events</param>
         [HttpPost("connectCallAsync")]
         [Tags("Connect Call APIs")]
-        public Task<IActionResult> ConnectCallAsync(
-            string serverCallId,
-            bool enableMediaStreaming = false,
-            bool isMixedAudio = false,
-            bool enableTranscription = false,
-            string transcriptionLocale = "en-US",
-            string operationContext = "ConnectCallContext")
-            => HandleConnectCall(serverCallId, enableMediaStreaming, isMixedAudio, enableTranscription, transcriptionLocale, operationContext, async: true);
+        public Task<IActionResult> ConnectCallAsync([FromBody] ConnectCallRequest request)
+            => HandleConnectCall(request, async: true);
 
         [HttpPost("connectCall")]
         [Tags("Connect Call APIs")]
-        public IActionResult ConnectCall(
-            string serverCallId,
-            bool enableMediaStreaming = false,
-            bool isMixedAudio = false,
-            bool enableTranscription = false,
-            string transcriptionLocale = "en-US",
-            string operationContext = "ConnectCallContext")
-            => HandleConnectCall(serverCallId, enableMediaStreaming, isMixedAudio, enableTranscription, transcriptionLocale, operationContext, async: false).Result;
+        public IActionResult ConnectCall([FromBody] ConnectCallRequest request)
+            => HandleConnectCall(request, async: false).Result;
 
-        // ───────────── PRIVATE HANDLERS ──────────────────────────────────────────
-
-        private async Task<IActionResult> HandleConnectCall(
-            string serverCallId,
-            bool enableMediaStreaming,
-            bool isMixedAudio,
-            bool enableTranscription,
-            string transcriptionLocale,
-            string operationContext,
-            bool async)
+        private async Task<IActionResult> HandleConnectCall(ConnectCallRequest request, bool async)
         {
-            if (string.IsNullOrEmpty(serverCallId))
+            if (string.IsNullOrEmpty(request.ServerCallId))
                 return BadRequest("serverCallId is required");
 
-            _logger.LogInformation("Connecting to call. ServerCallId={ServerCallId}, MediaStreaming={MediaStreaming}, Transcription={Transcription}",
-                serverCallId, enableMediaStreaming, enableTranscription);
+            _logger.LogInformation("Connecting to call. ServerCallId={ServerCallId}, MediaStreaming={HasMedia}, Transcription={HasTranscription}",
+                request.ServerCallId, request.MediaStreamingOptions != null, request.TranscriptionOptions != null);
 
             try
             {
                 var callbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks");
-                var websocketUri = _config.CallbackUriHost.Replace("https", "wss") + "/ws";
+                var websocketUri = _config.CallbackUriHost.Replace("https://", "wss://").Replace("http://", "ws://").TrimEnd('/') + "/ws";
 
-                var callLocator = new ServerCallLocator(serverCallId);
+                var callLocator = new ServerCallLocator(request.ServerCallId);
                 var connectOpts = new ConnectCallOptions(callLocator, callbackUri)
                 {
-                    OperationContext = operationContext
+                    OperationContext = request.OperationContext
                 };
 
-                if (enableMediaStreaming)
+                if (request.MediaStreamingOptions != null)
                 {
-                    var audioChannel = isMixedAudio ? MediaStreamingAudioChannel.Mixed : MediaStreamingAudioChannel.Unmixed;
+                    var ms = request.MediaStreamingOptions;
+                    var audioChannel = ms.MediaStreamingAudioChannel?.Equals("Unmixed", StringComparison.OrdinalIgnoreCase) == true
+                        ? MediaStreamingAudioChannel.Unmixed : MediaStreamingAudioChannel.Mixed;
+                    var audioFormat = ms.AudioFormat?.Equals("Pcm24KMono", StringComparison.OrdinalIgnoreCase) == true
+                        ? AudioFormat.Pcm24KMono : AudioFormat.Pcm16KMono;
+
                     connectOpts.MediaStreamingOptions = new MediaStreamingOptions(
                         new Uri(websocketUri),
                         MediaStreamingContent.Audio,
                         audioChannel,
                         MediaStreamingTransport.Websocket,
-                        false);
+                        ms.StartMediaStreaming)
+                    {
+                        EnableBidirectional = ms.EnableBidirectional,
+                        AudioFormat = audioFormat
+                    };
                 }
 
-                if (enableTranscription)
+                if (request.TranscriptionOptions != null)
                 {
+                    var tc = request.TranscriptionOptions;
                     connectOpts.TranscriptionOptions = new TranscriptionOptions(
                         new Uri(websocketUri),
-                        transcriptionLocale,
-                        false,
-                        TranscriptionTransport.Websocket);
+                        tc.Locale,
+                        tc.StartTranscription,
+                        TranscriptionTransport.Websocket)
+                    {
+                        EnableIntermediateResults = tc.EnableIntermediateResults
+                    };
                 }
 
                 ConnectCallResult result = async
@@ -128,5 +115,4 @@ namespace Call_Automation_GCCH.Controllers
             }
         }
     }
-
 }

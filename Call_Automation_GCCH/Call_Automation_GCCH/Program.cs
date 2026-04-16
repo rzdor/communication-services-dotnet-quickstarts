@@ -23,6 +23,12 @@ builder.Services.AddSwaggerGen(c =>
             .FirstOrDefault() ?? "zzz";
         return tag;
     });
+
+    // Include XML comments for descriptions and examples in Swagger UI
+    var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+    if (File.Exists(xmlPath))
+        c.IncludeXmlComments(xmlPath);
 });
 
 // Add CallAutomationService as a singleton behind ICallAutomationService
@@ -57,20 +63,24 @@ app.UseSwaggerUI(c =>
     // So the UI is served at /swagger
     c.RoutePrefix = "swagger";
 
-    // Use the custom GCCHSwagger.html from wwwroot/swagger-ui
-    c.IndexStream = () =>
+    // Use the custom GCCHSwagger.html from wwwroot/swagger-ui if it exists
+    var customSwaggerPath = Path.Combine(builder.Environment.WebRootPath ?? builder.Environment.ContentRootPath, "swagger-ui", "GCCHSwagger.html");
+    if (File.Exists(customSwaggerPath))
     {
-        var path = Path.Combine(builder.Environment.WebRootPath, "swagger-ui", "GCCHSwagger.html");
-        return File.OpenRead(path);
-    };
+        c.IndexStream = () => File.OpenRead(customSwaggerPath);
+    }
 });
 
 // Configure the audio files path
-app.UseStaticFiles(new StaticFileOptions
+var audioPath = Path.Combine(builder.Environment.ContentRootPath, "wwwroot", "audio");
+if (Directory.Exists(audioPath))
 {
-    FileProvider = new PhysicalFileProvider(Path.Combine(builder.Environment.ContentRootPath, "wwwroot", "audio")),
-    RequestPath = "/audio"
-});
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(audioPath),
+        RequestPath = "/audio"
+    });
+}
 
 // Enable WebSocket support
 app.UseWebSockets();

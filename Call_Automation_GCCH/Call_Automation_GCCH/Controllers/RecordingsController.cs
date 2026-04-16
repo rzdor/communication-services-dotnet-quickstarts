@@ -1,4 +1,5 @@
 ﻿using System;
+using System;
 using System.IO;
 using System.Threading.Tasks;
 using Azure.Communication;
@@ -8,7 +9,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Call_Automation_GCCH.Models;
 using Call_Automation_GCCH.Services;
-using System.ComponentModel.DataAnnotations;
 
 namespace Call_Automation_GCCH.Controllers
 {
@@ -31,588 +31,202 @@ namespace Call_Automation_GCCH.Controllers
             _config = configOptions.Value ?? throw new ArgumentNullException(nameof(configOptions));
         }
 
-        /// <summary>
-        /// Starts a recording with configurable options asynchronously
-        /// </summary>
-        /// <param name="callConnectionId">The call connection ID for the call to record</param>
-        /// <param name="isAudioVideo">True for AudioVideo content, false for Audio only</param>
-        /// <param name="recordingFormat">Recording format (valid options: Mp3, Mp4, Wav)</param>
-        /// <param name="isMixed">True for mixed channel (all participants combined), false for unmixed (separate streams)</param>
-        /// <param name="isRecordingWithCallConnectionId">Whether to use call connection ID for recording</param>
-        /// <param name="isPauseOnStart">Whether to pause recording on start</param>
+        /// <summary>Starts a recording. Include "recordingOptions" to customize format/channel. Omit for defaults.</summary>
         [HttpPost("startRecordingAsync")]
         [Tags("Recording APIs")]
-        public async Task<IActionResult> StartRecordingAsync(
-            string callConnectionId,
-            bool isAudioVideo = false,
-            string recordingFormat = "Mp3",
-            bool isMixed = true,
-            bool isRecordingWithCallConnectionId = true,
-            bool isPauseOnStart = false)
-        {
-            try
-            {
-                // Validate required parameter
-                if (string.IsNullOrWhiteSpace(callConnectionId))
-                {
-                    return BadRequest("CallConnectionId is required.");
-                }
-
-                // Trim whitespace from text inputs (except callConnectionId)
-                recordingFormat = recordingFormat?.Trim() ?? "Mp3";
-
-                // Convert bool parameters to enums
-                var recordingContent = isAudioVideo ? RecordingContent.AudioVideo : RecordingContent.Audio;
-                var recordingChannel = isMixed ? RecordingChannel.Mixed : RecordingChannel.Unmixed;
-
-                // Parse and validate recording format using switch case
-                RecordingFormat format;
-                switch (recordingFormat.ToLowerInvariant())
-                {
-                    case "mp3":
-                        format = RecordingFormat.Mp3;
-                        break;
-                    case "mp4":
-                        format = RecordingFormat.Mp4;
-                        break;
-                    case "wav":
-                        format = RecordingFormat.Wav;
-                        break;
-                    default:
-                        return BadRequest($"Invalid recording format '{recordingFormat}'. Valid options: Mp3, Mp4, Wav");
-                }
-
-                // Validate format compatibility
-                if (recordingContent == RecordingContent.AudioVideo && format != RecordingFormat.Mp4)
-                {
-                    return BadRequest("AudioVideo content is only supported with Mp4 format.");
-                }
-
-                CallConnectionProperties callConnectionProperties = _service.GetCallConnectionProperties(callConnectionId);
-                var serverCallId = callConnectionProperties.ServerCallId;
-                var correlationId = callConnectionProperties.CorrelationId;
-                CallLocator callLocator = new ServerCallLocator(serverCallId);
-
-                var recordingOptions = isRecordingWithCallConnectionId
-                    ? new StartRecordingOptions(callConnectionProperties.CallConnectionId)
-                    : new StartRecordingOptions(callLocator);
-
-                recordingOptions.RecordingContent = recordingContent;
-                recordingOptions.RecordingFormat = format;
-                recordingOptions.RecordingChannel = recordingChannel;
-                recordingOptions.RecordingStateCallbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks");
-                recordingOptions.PauseOnStart = isPauseOnStart;
-
-                _service.RecordingFileFormat = format.ToString();
-
-                var recordingResult = await _service.GetCallAutomationClient().GetCallRecording().StartAsync(recordingOptions);
-                var recordingId = recordingResult.Value.RecordingId;
-
-                string successMessage = $"Recording started. RecordingId: {recordingId}. CallConnectionId: {callConnectionId}, CorrelationId: {correlationId}, Content: {recordingContent}, Format: {format}, Channel: {recordingChannel}, Status: {recordingResult.GetRawResponse().Status.ToString()}";
-                _logger.LogInformation(successMessage);
-
-                return Ok(new CallConnectionResponse
-                {
-                    CallConnectionId = callConnectionId,
-                    CorrelationId = correlationId,
-                    Status = $"Recording started. RecordingId: {recordingId}. Content: {recordingContent}, Format: {format}, Channel: {recordingChannel}, Status: {recordingResult.GetRawResponse().Status.ToString()}"
-                });
-            }
-            catch (Exception ex)
-            {
-                string errorMessage = $"Error starting recording: {ex.Message}. CallConnectionId: {callConnectionId}";
-                _logger.LogError(errorMessage);
-                return Problem($"Failed to start recording: {ex.Message}. CallConnectionId: {callConnectionId}");
-            }
-        }
-
-        /// <summary>
-        /// Starts a recording with configurable options synchronously
-        /// </summary>
-        /// <param name="callConnectionId">The call connection ID for the call to record</param>
-        /// <param name="isAudioVideo">True for AudioVideo content, false for Audio only</param>
-        /// <param name="recordingFormat">Recording format (valid options: Mp3, Mp4, Wav)</param>
-        /// <param name="isMixed">True for mixed channel (all participants combined), false for unmixed (separate streams)</param>
-        /// <param name="isRecordingWithCallConnectionId">Whether to use call connection ID for recording</param>
-        /// <param name="isPauseOnStart">Whether to pause recording on start</param>
+        public Task<IActionResult> StartRecordingAsync([FromBody] StartRecordingRequest request) => HandleStartRecording(request, async: true);
         [HttpPost("startRecording")]
         [Tags("Recording APIs")]
-        public IActionResult StartRecording(
-            string callConnectionId,
-            bool isAudioVideo = false,
-            string recordingFormat = "Mp3",
-            bool isMixed = true,
-            bool isRecordingWithCallConnectionId = true,
-            bool isPauseOnStart = false)
+        public IActionResult StartRecording([FromBody] StartRecordingRequest request) => HandleStartRecording(request, async: false).Result;
+
+        /// <summary>Pauses a recording.</summary>
+        [HttpPost("pauseRecordingAsync")]
+        [Tags("Recording APIs")]
+        public Task<IActionResult> PauseRecordingAsync(string callConnectionId, string recordingId) => HandlePauseRecording(callConnectionId, recordingId, async: true);
+        [HttpPost("pauseRecording")]
+        [Tags("Recording APIs")]
+        public IActionResult PauseRecording(string callConnectionId, string recordingId) => HandlePauseRecording(callConnectionId, recordingId, async: false).Result;
+
+        /// <summary>Resumes a recording.</summary>
+        [HttpPost("resumeRecordingAsync")]
+        [Tags("Recording APIs")]
+        public Task<IActionResult> ResumeRecordingAsync(string callConnectionId, string recordingId) => HandleResumeRecording(callConnectionId, recordingId, async: true);
+        [HttpPost("resumeRecording")]
+        [Tags("Recording APIs")]
+        public IActionResult ResumeRecording(string callConnectionId, string recordingId) => HandleResumeRecording(callConnectionId, recordingId, async: false).Result;
+
+        /// <summary>Stops a recording.</summary>
+        [HttpPost("stopRecordingAsync")]
+        [Tags("Recording APIs")]
+        public Task<IActionResult> StopRecordingAsync(string callConnectionId, string recordingId) => HandleStopRecording(callConnectionId, recordingId, async: true);
+        [HttpPost("stopRecording")]
+        [Tags("Recording APIs")]
+        public IActionResult StopRecording(string callConnectionId, string recordingId) => HandleStopRecording(callConnectionId, recordingId, async: false).Result;
+
+        /// <summary>Downloads the recording to a local temp file.</summary>
+        [HttpPost("downloadRecordingAsync")]
+        [Tags("Recording APIs")]
+        public Task<IActionResult> DownloadRecordingAsync(string callConnectionId) => HandleDownloadRecording(callConnectionId, async: true);
+        [HttpPost("downloadRecording")]
+        [Tags("Recording APIs")]
+        public IActionResult DownloadRecording(string callConnectionId) => HandleDownloadRecording(callConnectionId, async: false).Result;
+
+        /// <summary>Gets the state of a recording.</summary>
+        [HttpGet("getRecordingStateAsync")]
+        [Tags("Recording APIs")]
+        public Task<IActionResult> GetRecordingStateAsync(string recordingId) => HandleGetRecordingState(recordingId, async: true);
+        [HttpGet("getRecordingState")]
+        [Tags("Recording APIs")]
+        public IActionResult GetRecordingState(string recordingId) => HandleGetRecordingState(recordingId, async: false).Result;
+
+        /// <summary>Deletes a recording.</summary>
+        [HttpDelete("deleteRecordingAsync")]
+        [Tags("Recording APIs")]
+        public Task<IActionResult> DeleteRecordingAsync(string recordingLocation) => HandleDeleteRecording(recordingLocation, async: true);
+        [HttpDelete("deleteRecording")]
+        [Tags("Recording APIs")]
+        public IActionResult DeleteRecording(string recordingLocation) => HandleDeleteRecording(recordingLocation, async: false).Result;
+
+        // ??? HANDLERS ???????????????????????????????????????????????????????????
+
+        private async Task<IActionResult> HandleStartRecording(StartRecordingRequest request, bool async)
         {
             try
             {
-                // Validate required parameter
-                if (string.IsNullOrWhiteSpace(callConnectionId))
-                {
+                if (string.IsNullOrWhiteSpace(request.CallConnectionId))
                     return BadRequest("CallConnectionId is required.");
-                }
 
-                // Trim whitespace from text inputs (except callConnectionId)
-                recordingFormat = recordingFormat?.Trim() ?? "Mp3";
+                var opts = request.RecordingOptions ?? new RecordingOptionsRequest();
+                var recordingContent = opts.IsAudioVideo ? RecordingContent.AudioVideo : RecordingContent.Audio;
+                var recordingChannel = opts.IsMixed ? RecordingChannel.Mixed : RecordingChannel.Unmixed;
 
-                // Convert bool parameters to enums
-                var recordingContent = isAudioVideo ? RecordingContent.AudioVideo : RecordingContent.Audio;
-                var recordingChannel = isMixed ? RecordingChannel.Mixed : RecordingChannel.Unmixed;
-
-                // Parse and validate recording format using switch case
-                RecordingFormat format;
-                switch (recordingFormat.ToLowerInvariant())
+                RecordingFormat format = (opts.RecordingFormat?.Trim() ?? "Mp3").ToLowerInvariant() switch
                 {
-                    case "mp3":
-                        format = RecordingFormat.Mp3;
-                        break;
-                    case "mp4":
-                        format = RecordingFormat.Mp4;
-                        break;
-                    case "wav":
-                        format = RecordingFormat.Wav;
-                        break;
-                    default:
-                        return BadRequest($"Invalid recording format '{recordingFormat}'. Valid options: Mp3, Mp4, Wav");
-                }
+                    "mp3" => RecordingFormat.Mp3,
+                    "mp4" => RecordingFormat.Mp4,
+                    "wav" => RecordingFormat.Wav,
+                    _ => throw new ArgumentException($"Invalid recording format '{opts.RecordingFormat}'. Valid: Mp3, Mp4, Wav")
+                };
 
-                // Validate format compatibility
                 if (recordingContent == RecordingContent.AudioVideo && format != RecordingFormat.Mp4)
-                {
                     return BadRequest("AudioVideo content is only supported with Mp4 format.");
-                }
 
-                CallConnectionProperties callConnectionProperties = _service.GetCallConnectionProperties(callConnectionId);
-                var serverCallId = callConnectionProperties.ServerCallId;
-                var correlationId = callConnectionProperties.CorrelationId;
-                CallLocator callLocator = new ServerCallLocator(serverCallId);
+                var callProps = _service.GetCallConnectionProperties(request.CallConnectionId);
+                CallLocator callLocator = new ServerCallLocator(callProps.ServerCallId);
 
-                var recordingOptions = isRecordingWithCallConnectionId
-                    ? new StartRecordingOptions(callConnectionProperties.CallConnectionId)
+                var recordingOptions = request.UseCallConnectionId
+                    ? new StartRecordingOptions(callProps.CallConnectionId)
                     : new StartRecordingOptions(callLocator);
 
                 recordingOptions.RecordingContent = recordingContent;
                 recordingOptions.RecordingFormat = format;
                 recordingOptions.RecordingChannel = recordingChannel;
                 recordingOptions.RecordingStateCallbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks");
-                recordingOptions.PauseOnStart = isPauseOnStart;
-
+                recordingOptions.PauseOnStart = opts.PauseOnStart;
                 _service.RecordingFileFormat = format.ToString();
 
-                var recordingResult = _service.GetCallAutomationClient().GetCallRecording().Start(recordingOptions);
-                var recordingId = recordingResult.Value.RecordingId;
-
-                string successMessage = $"Recording started. RecordingId: {recordingId}. CallConnectionId: {callConnectionId}, CorrelationId: {correlationId}, Content: {recordingContent}, Format: {format}, Channel: {recordingChannel}, Status: {recordingResult.GetRawResponse().Status.ToString()}";
-                _logger.LogInformation(successMessage);
+                var result = async
+                    ? await _service.GetCallAutomationClient().GetCallRecording().StartAsync(recordingOptions)
+                    : _service.GetCallAutomationClient().GetCallRecording().Start(recordingOptions);
 
                 return Ok(new CallConnectionResponse
                 {
-                    CallConnectionId = callConnectionId,
-                    CorrelationId = correlationId,
-                    Status = $"Recording started. RecordingId: {recordingId}. Content: {recordingContent}, Format: {format}, Channel: {recordingChannel}, Status: {recordingResult.GetRawResponse().Status.ToString()}"
+                    CallConnectionId = request.CallConnectionId, CorrelationId = callProps.CorrelationId,
+                    Status = $"Recording started. RecordingId: {result.Value.RecordingId}. Content: {recordingContent}, Format: {format}, Channel: {recordingChannel}"
                 });
             }
-            catch (Exception ex)
-            {
-                string errorMessage = $"Error starting recording: {ex.Message}. CallConnectionId: {callConnectionId}";
-                _logger.LogError(errorMessage);
-                return Problem($"Failed to start recording: {ex.Message}. CallConnectionId: {callConnectionId}");
-            }
+            catch (ArgumentException ex) { return BadRequest(ex.Message); }
+            catch (Exception ex) { _logger.LogError(ex, "Error starting recording"); return Problem($"Failed to start recording: {ex.Message}"); }
         }
 
-        /// <summary>
-        /// Pauses a recording asynchronously
-        /// </summary>
-        [HttpPost("pauseRecordingAsync")]
-        [Tags("Recording APIs")]
-        public async Task<IActionResult> PauseRecordingAsync(
-            string callConnectionId,
-            string recordingId)
+        private async Task<IActionResult> HandlePauseRecording(string callConnectionId, string recordingId, bool async)
         {
             try
             {
-                var callConnection = _service.GetCallConnection(callConnectionId);
                 var correlationId = _service.GetCallConnectionProperties(callConnectionId).CorrelationId;
-
-                var pauseResult = await _service.GetCallAutomationClient().GetCallRecording().PauseAsync(recordingId);
-
-                string successMessage = $"Recording paused successfully. RecordingId: {recordingId}. CallConnectionId: {callConnectionId}, CorrelationId: {correlationId}, Status: {pauseResult.Status}";
-                _logger.LogInformation(successMessage);
-
-                return Ok(new CallConnectionResponse
-                {
-                    CallConnectionId = callConnectionId,
-                    CorrelationId = correlationId,
-                    Status = $"Recording paused. RecordingId: {recordingId}. Status: {pauseResult.Status}"
-                });
+                var result = async
+                    ? await _service.GetCallAutomationClient().GetCallRecording().PauseAsync(recordingId)
+                    : _service.GetCallAutomationClient().GetCallRecording().Pause(recordingId);
+                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = correlationId, Status = $"Recording paused. RecordingId: {recordingId}. Status: {result.Status}" });
             }
-            catch (Exception ex)
-            {
-                string errorMessage = $"Error pausing recording: {ex.Message}. CallConnectionId: {callConnectionId}";
-                _logger.LogError(errorMessage);
-                return Problem($"Failed to pause recording: {ex.Message}. CallConnectionId: {callConnectionId}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error pausing recording"); return Problem($"Failed to pause recording: {ex.Message}"); }
         }
 
-        /// <summary>
-        /// Pauses a recording synchronously
-        /// </summary>
-        [HttpPost("pauseRecording")]
-        [Tags("Recording APIs")]
-        public IActionResult PauseRecording(
-            string callConnectionId,
-            string recordingId)
+        private async Task<IActionResult> HandleResumeRecording(string callConnectionId, string recordingId, bool async)
         {
             try
             {
-                var callConnection = _service.GetCallConnection(callConnectionId);
                 var correlationId = _service.GetCallConnectionProperties(callConnectionId).CorrelationId;
-
-                var pauseResult = _service.GetCallAutomationClient().GetCallRecording().Pause(recordingId);
-
-                string successMessage = $"Recording paused successfully. RecordingId: {recordingId}. CallConnectionId: {callConnectionId}, CorrelationId: {correlationId}, Status: {pauseResult.Status}";
-                _logger.LogInformation(successMessage);
-
-                return Ok(new CallConnectionResponse
-                {
-                    CallConnectionId = callConnectionId,
-                    CorrelationId = correlationId,
-                    Status = $"Recording paused. RecordingId: {recordingId}. Status: {pauseResult.Status}"
-                });
+                var result = async
+                    ? await _service.GetCallAutomationClient().GetCallRecording().ResumeAsync(recordingId)
+                    : _service.GetCallAutomationClient().GetCallRecording().Resume(recordingId);
+                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = correlationId, Status = $"Recording resumed. RecordingId: {recordingId}. Status: {result.Status}" });
             }
-            catch (Exception ex)
-            {
-                string errorMessage = $"Error pausing recording: {ex.Message}. CallConnectionId: {callConnectionId}";
-                _logger.LogError(errorMessage);
-                return Problem($"Failed to pause recording: {ex.Message}. CallConnectionId: {callConnectionId}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error resuming recording"); return Problem($"Failed to resume recording: {ex.Message}"); }
         }
 
-        /// <summary>
-        /// Resumes a recording asynchronously
-        /// </summary>
-        [HttpPost("resumeRecordingAsync")]
-        [Tags("Recording APIs")]
-        public async Task<IActionResult> ResumeRecordingAsync(
-            string callConnectionId,
-            string recordingId)
+        private async Task<IActionResult> HandleStopRecording(string callConnectionId, string recordingId, bool async)
         {
             try
             {
-                var callConnection = _service.GetCallConnection(callConnectionId);
                 var correlationId = _service.GetCallConnectionProperties(callConnectionId).CorrelationId;
-
-                var resumeRecordingResult = await _service.GetCallAutomationClient().GetCallRecording().ResumeAsync(recordingId);
-
-                string successMessage = $"Recording resumed successfully. RecordingId: {recordingId}. CallConnectionId: {callConnectionId}, CorrelationId: {correlationId}, Status: {resumeRecordingResult.Status}";
-                _logger.LogInformation(successMessage);
-
-                return Ok(new CallConnectionResponse
-                {
-                    CallConnectionId = callConnectionId,
-                    CorrelationId = correlationId,
-                    Status = $"Recording resumed. RecordingId: {recordingId}. Status: {resumeRecordingResult.Status}"
-                });
+                var result = async
+                    ? await _service.GetCallAutomationClient().GetCallRecording().StopAsync(recordingId)
+                    : _service.GetCallAutomationClient().GetCallRecording().Stop(recordingId);
+                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = correlationId, Status = $"Recording stopped. RecordingId: {recordingId}. Status: {result.Status}" });
             }
-            catch (Exception ex)
-            {
-                string errorMessage = $"Error resuming recording: {ex.Message}. CallConnectionId: {callConnectionId}";
-                _logger.LogError(errorMessage);
-                return Problem($"Failed to resume recording: {ex.Message}. CallConnectionId: {callConnectionId}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error stopping recording"); return Problem($"Failed to stop recording: {ex.Message}"); }
         }
 
-        /// <summary>
-        /// Resumes a recording synchronously
-        /// </summary>
-        [HttpPost("resumeRecording")]
-        [Tags("Recording APIs")]
-        public IActionResult ResumeRecording(
-            string callConnectionId,
-            string recordingId)
-        {
-            try
-            {
-                var callConnection = _service.GetCallConnection(callConnectionId);
-                var correlationId = _service.GetCallConnectionProperties(callConnectionId).CorrelationId;
-
-                var resumeRecordingResult = _service.GetCallAutomationClient().GetCallRecording().Resume(recordingId);
-
-                string successMessage = $"Recording resumed successfully. RecordingId: {recordingId}. CallConnectionId: {callConnectionId}, CorrelationId: {correlationId}, Status: {resumeRecordingResult.Status}";
-                _logger.LogInformation(successMessage);
-
-                return Ok(new CallConnectionResponse
-                {
-                    CallConnectionId = callConnectionId,
-                    CorrelationId = correlationId,
-                    Status = $"Recording resumed. RecordingId: {recordingId}. Status: {resumeRecordingResult.Status}"
-                });
-            }
-            catch (Exception ex)
-            {
-                string errorMessage = $"Error resuming recording: {ex.Message}. CallConnectionId: {callConnectionId}";
-                _logger.LogError(errorMessage);
-                return Problem($"Failed to resume recording: {ex.Message}. CallConnectionId: {callConnectionId}");
-            }
-        }
-
-        /// <summary>
-        /// Stops a recording asynchronously
-        /// </summary>
-        [HttpPost("stopRecordingAsync")]
-        [Tags("Recording APIs")]
-        public async Task<IActionResult> StopRecordingAsync(
-            string callConnectionId,
-            string recordingId)
-        {
-            try
-            {
-                var callConnection = _service.GetCallConnection(callConnectionId);
-                var correlationId = _service.GetCallConnectionProperties(callConnectionId).CorrelationId;
-
-                var stopRecordingResult = await _service.GetCallAutomationClient().GetCallRecording().StopAsync(recordingId);
-
-                string successMessage = $"Recording stopped successfully. RecordingId: {recordingId}. CallConnectionId: {callConnectionId}, CorrelationId: {correlationId}, Status: {stopRecordingResult.Status}";
-                _logger.LogInformation(successMessage);
-
-                return Ok(new CallConnectionResponse
-                {
-                    CallConnectionId = callConnectionId,
-                    CorrelationId = correlationId,
-                    Status = $"Recording stopped. RecordingId: {recordingId}. Status: {stopRecordingResult.Status}"
-                });
-            }
-            catch (Exception ex)
-            {
-                string errorMessage = $"Error stopping recording: {ex.Message}. CallConnectionId: {callConnectionId}";
-                _logger.LogError(errorMessage);
-                return Problem($"Failed to stop recording: {ex.Message}. CallConnectionId: {callConnectionId}");
-            }
-        }
-
-        /// <summary>
-        /// Stops a recording synchronously
-        /// </summary>
-        [HttpPost("stopRecording")]
-        [Tags("Recording APIs")]
-        public IActionResult StopRecording(
-            string callConnectionId,
-            string recordingId)
-        {
-            try
-            {
-                var callConnection = _service.GetCallConnection(callConnectionId);
-                var correlationId = _service.GetCallConnectionProperties(callConnectionId).CorrelationId;
-
-                var stopRecordingResult = _service.GetCallAutomationClient().GetCallRecording().Stop(recordingId);
-
-                string successMessage = $"Recording stopped successfully. RecordingId: {recordingId}. CallConnectionId: {callConnectionId}, CorrelationId: {correlationId}, Status: {stopRecordingResult.Status}";
-                _logger.LogInformation(successMessage);
-
-                return Ok(new CallConnectionResponse
-                {
-                    CallConnectionId = callConnectionId,
-                    CorrelationId = correlationId,
-                    Status = $"Recording stopped. RecordingId: {recordingId}. Status: {stopRecordingResult.Status}"
-                });
-            }
-            catch (Exception ex)
-            {
-                string errorMessage = $"Error stopping recording: {ex.Message}. CallConnectionId: {callConnectionId}";
-                _logger.LogError(errorMessage);
-                return Problem($"Failed to stop recording: {ex.Message}. CallConnectionId: {callConnectionId}");
-            }
-        }
-
-        /// <summary>
-        /// Downloads the recording to a local temp file asynchronously.
-        /// </summary>
-        [HttpPost("downloadRecordingAsync")]
-        [Tags("Recording APIs")]
-        public async Task<IActionResult> DownloadRecordingAsync(string callConnectionId)
+        private async Task<IActionResult> HandleDownloadRecording(string callConnectionId, bool async)
         {
             try
             {
                 var location = _service.RecordingLocation;
                 var format = _service.RecordingFileFormat;
-
-                if (string.IsNullOrEmpty(location))
-                    return Problem("Recording location is not available from the events.");
-                if (string.IsNullOrEmpty(format))
-                    return Problem("Recording file format is not available from the events.");
+                if (string.IsNullOrEmpty(location)) return Problem("Recording location is not available from the events.");
+                if (string.IsNullOrEmpty(format)) return Problem("Recording file format is not available from the events.");
 
                 var correlationId = _service.GetCallConnectionProperties(callConnectionId).CorrelationId;
-                var date = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-                var fileName = $"Recording_{callConnectionId}_{date}.{format}";
-
+                var fileName = $"Recording_{callConnectionId}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.{format}";
                 var tempDir = Path.Combine(Path.GetTempPath(), "call-recordings");
                 Directory.CreateDirectory(tempDir);
                 var localFilePath = Path.Combine(tempDir, fileName);
 
                 using var fileStream = new FileStream(localFilePath, FileMode.Create, FileAccess.Write);
-                var downloadResult = await _service.GetCallAutomationClient().GetCallRecording().DownloadToAsync(new Uri(location), fileStream);
+                var result = async
+                    ? await _service.GetCallAutomationClient().GetCallRecording().DownloadToAsync(new Uri(location), fileStream)
+                    : _service.GetCallAutomationClient().GetCallRecording().DownloadTo(new Uri(location), fileStream);
 
-                _logger.LogInformation("Recording downloaded. Path={Path}, Status={Status}", localFilePath, downloadResult.Status);
-
-                return Ok(new CallConnectionResponse
-                {
-                    CallConnectionId = callConnectionId,
-                    CorrelationId = correlationId,
-                    Status = $"Recording downloaded. Path: {localFilePath}, Status: {downloadResult.Status}"
-                });
+                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = correlationId, Status = $"Recording downloaded. Path: {localFilePath}, Status: {result.Status}" });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error downloading recording. CallConnectionId={CallConnectionId}", callConnectionId);
-                return Problem($"Failed to download recording: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error downloading recording"); return Problem($"Failed to download recording: {ex.Message}"); }
         }
 
-        /// <summary>
-        /// Downloads the recording to a local temp file synchronously.
-        /// </summary>
-        [HttpPost("downloadRecording")]
-        [Tags("Recording APIs")]
-        public IActionResult DownloadRecording(string callConnectionId)
+        private async Task<IActionResult> HandleGetRecordingState(string recordingId, bool async)
         {
             try
             {
-                var location = _service.RecordingLocation;
-                var format = _service.RecordingFileFormat;
-
-                if (string.IsNullOrEmpty(location))
-                    return Problem("Recording location is not available from the events.");
-                if (string.IsNullOrEmpty(format))
-                    return Problem("Recording file format is not available from the events.");
-
-                var correlationId = _service.GetCallConnectionProperties(callConnectionId).CorrelationId;
-                var date = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-                var fileName = $"Recording_{callConnectionId}_{date}.{format}";
-
-                var tempDir = Path.Combine(Path.GetTempPath(), "call-recordings");
-                Directory.CreateDirectory(tempDir);
-                var localFilePath = Path.Combine(tempDir, fileName);
-
-                using var fileStream = new FileStream(localFilePath, FileMode.Create, FileAccess.Write);
-                var downloadResult = _service.GetCallAutomationClient().GetCallRecording().DownloadTo(new Uri(location), fileStream);
-
-                _logger.LogInformation("Recording downloaded. Path={Path}, Status={Status}", localFilePath, downloadResult.Status);
-
-                return Ok(new CallConnectionResponse
-                {
-                    CallConnectionId = callConnectionId,
-                    CorrelationId = correlationId,
-                    Status = $"Recording downloaded. Path: {localFilePath}, Status: {downloadResult.Status}"
-                });
+                if (string.IsNullOrEmpty(recordingId)) return BadRequest("RecordingId is required");
+                var result = async
+                    ? await _service.GetCallAutomationClient().GetCallRecording().GetStateAsync(recordingId)
+                    : _service.GetCallAutomationClient().GetCallRecording().GetState(recordingId);
+                return Ok(new { RecordingId = recordingId, RecordingState = result.Value.RecordingState?.ToString(), Status = result.GetRawResponse().Status.ToString() });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error downloading recording. CallConnectionId={CallConnectionId}", callConnectionId);
-                return Problem($"Failed to download recording: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error getting recording state"); return Problem($"Failed to get recording state: {ex.Message}"); }
         }
 
-        // ──────────── GET RECORDING STATE ──────────────────────────────────────────
-
-        [HttpGet("getRecordingStateAsync")]
-        [Tags("Recording APIs")]
-        public async Task<IActionResult> GetRecordingStateAsync(string recordingId)
+        private async Task<IActionResult> HandleDeleteRecording(string recordingLocation, bool async)
         {
             try
             {
-                if (string.IsNullOrEmpty(recordingId))
-                    return BadRequest("RecordingId is required");
-
-                var result = await _service.GetCallAutomationClient().GetCallRecording().GetStateAsync(recordingId);
-
-                _logger.LogInformation($"Recording state retrieved. RecordingId: {recordingId}, Status: {result.Value.RecordingState}");
-
-                return Ok(new
-                {
-                    RecordingId = recordingId,
-                    RecordingState = result.Value.RecordingState?.ToString(),
-                    Status = result.GetRawResponse().Status.ToString()
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting recording state. RecordingId: {RecordingId}", recordingId);
-                return Problem($"Failed to get recording state: {ex.Message}");
-            }
-        }
-
-        [HttpGet("getRecordingState")]
-        [Tags("Recording APIs")]
-        public IActionResult GetRecordingState(string recordingId)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(recordingId))
-                    return BadRequest("RecordingId is required");
-
-                var result = _service.GetCallAutomationClient().GetCallRecording().GetState(recordingId);
-
-                _logger.LogInformation($"Recording state retrieved. RecordingId: {recordingId}, Status: {result.Value.RecordingState}");
-
-                return Ok(new
-                {
-                    RecordingId = recordingId,
-                    RecordingState = result.Value.RecordingState?.ToString(),
-                    Status = result.GetRawResponse().Status.ToString()
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting recording state. RecordingId: {RecordingId}", recordingId);
-                return Problem($"Failed to get recording state: {ex.Message}");
-            }
-        }
-
-        // ──────────── DELETE RECORDING ─────────────────────────────────────────────
-
-        [HttpDelete("deleteRecordingAsync")]
-        [Tags("Recording APIs")]
-        public async Task<IActionResult> DeleteRecordingAsync(string recordingLocation)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(recordingLocation))
-                    return BadRequest("Recording location URL is required");
-
-                var result = await _service.GetCallAutomationClient().GetCallRecording().DeleteAsync(new Uri(recordingLocation));
-
-                _logger.LogInformation($"Recording deleted. Location: {recordingLocation}, Status: {result.Status}");
-
+                if (string.IsNullOrEmpty(recordingLocation)) return BadRequest("Recording location URL is required");
+                var result = async
+                    ? await _service.GetCallAutomationClient().GetCallRecording().DeleteAsync(new Uri(recordingLocation))
+                    : _service.GetCallAutomationClient().GetCallRecording().Delete(new Uri(recordingLocation));
                 return Ok(new { RecordingLocation = recordingLocation, Status = result.Status.ToString() });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error deleting recording. Location: {RecordingLocation}", recordingLocation);
-                return Problem($"Failed to delete recording: {ex.Message}");
-            }
-        }
-
-        [HttpDelete("deleteRecording")]
-        [Tags("Recording APIs")]
-        public IActionResult DeleteRecording(string recordingLocation)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(recordingLocation))
-                    return BadRequest("Recording location URL is required");
-
-                var result = _service.GetCallAutomationClient().GetCallRecording().Delete(new Uri(recordingLocation));
-
-                _logger.LogInformation($"Recording deleted. Location: {recordingLocation}, Status: {result.Status}");
-
-                return Ok(new { RecordingLocation = recordingLocation, Status = result.Status.ToString() });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error deleting recording. Location: {RecordingLocation}", recordingLocation);
-                return Problem($"Failed to delete recording: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error deleting recording"); return Problem($"Failed to delete recording: {ex.Message}"); }
         }
     }
 }

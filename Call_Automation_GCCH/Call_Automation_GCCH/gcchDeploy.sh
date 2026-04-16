@@ -1,12 +1,12 @@
 #!/bin/bash
 
 LOCATION='eastus'
-RESOURCE_GROUP_NAME='waferwire-gcch-test'
+RESOURCE_GROUP_NAME='waferwire-rg'
 
 WEB_APP_NAME='gcch-test-app'
 APP_SERVICE_PLAN_NAME='gcch-test-app-service'
 RUNTIME='DOTNETCORE|8.0'
-SUBSCRIPTION_ID='<your subcription id>'
+SUBSCRIPTION_ID='80ae91d7-9d71-46a5-ad81-6a10c333007e'
 
 # Log in to Azure
 az login

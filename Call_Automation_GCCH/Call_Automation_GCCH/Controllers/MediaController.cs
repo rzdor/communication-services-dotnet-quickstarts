@@ -1,3 +1,4 @@
+ï»¿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -21,607 +22,274 @@ namespace Call_Automation_GCCH.Controllers
         private readonly ILogger<MediaController> _logger;
         private readonly AcsCommunicationSettings _config;
 
-        public MediaController(
-            ICallAutomationService service,
-            ILogger<MediaController> logger,
-            IOptions<AcsCommunicationSettings> configOptions)
+        public MediaController(ICallAutomationService service, ILogger<MediaController> logger, IOptions<AcsCommunicationSettings> configOptions)
         {
             _service = service ?? throw new ArgumentNullException(nameof(service));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _config = configOptions.Value ?? throw new ArgumentNullException(nameof(configOptions));
         }
 
-        #region Play – 3 overloads: PlayOptions | PlaySource,targets | IEnumerable<PlaySource>,targets
-
-        /// <summary>
-        /// Plays audio to specific target(s).
-        /// useOptions=true  ? Play(PlayOptions) with all configurable fields.
-        /// useOptions=false ? Play(PlaySource, targets) simple overload.
-        /// </summary>
-        /// <param name="callConnectionId">The call connection ID</param>
-        /// <param name="target">ACS user ID (8:...) or phone number (+...)</param>
-        /// <param name="useOptions">true = PlayOptions overload, false = simple (PlaySource, targets) overload</param>
-        /// <param name="interruptHoldAudio">Interrupts hold audio (PlayOptions only)</param>
-        /// <param name="loop">Loop the audio (PlayOptions only)</param>
-        /// <param name="operationContext">Custom context (PlayOptions only)</param>
+        /// <summary>Plays audio to a specific target. Include "playOptions" for loop/interrupt. Omit for simple play.</summary>
         [HttpPost("/playAsync")]
         [Tags("Play Media")]
-        public Task<IActionResult> PlayAsync(
-            string callConnectionId, string target,
-            bool useOptions = true,
-            bool interruptHoldAudio = false, bool loop = false,
-            string operationContext = "playContext")
-            => HandlePlay(callConnectionId, target, useOptions, interruptHoldAudio, loop, operationContext, async: true);
-
+        public Task<IActionResult> PlayAsync([FromBody] PlayRequest request) => HandlePlay(request, async: true);
         [HttpPost("/play")]
         [Tags("Play Media")]
-        public IActionResult Play(
-            string callConnectionId, string target,
-            bool useOptions = true,
-            bool interruptHoldAudio = false, bool loop = false,
-            string operationContext = "playContext")
-            => HandlePlay(callConnectionId, target, useOptions, interruptHoldAudio, loop, operationContext, async: false).Result;
+        public IActionResult Play([FromBody] PlayRequest request) => HandlePlay(request, async: false).Result;
 
-        #endregion
-
-        #region PlayToAll – 3 overloads: PlayToAllOptions | PlaySource | IEnumerable<PlaySource>
-
-        /// <summary>
-        /// Plays audio to all participants.
-        /// useOptions=true  ? PlayToAll(PlayToAllOptions) with all configurable fields.
-        /// useOptions=false ? PlayToAll(PlaySource) simple overload.
-        /// </summary>
-        /// <param name="callConnectionId">The call connection ID</param>
-        /// <param name="useOptions">true = PlayToAllOptions overload, false = simple (PlaySource) overload</param>
-        /// <param name="interruptCallMediaOperation">Interrupts current media / barge-in (PlayToAllOptions only)</param>
-        /// <param name="loop">Loop the audio (PlayToAllOptions only)</param>
-        /// <param name="operationContext">Custom context (PlayToAllOptions only)</param>
+        /// <summary>Plays audio to all participants. Include "playToAllOptions" for loop/interrupt. Omit for simple play.</summary>
         [HttpPost("/playToAllAsync")]
         [Tags("Play Media")]
-        public Task<IActionResult> PlayToAllAsync(
-            string callConnectionId,
-            bool useOptions = true,
-            bool interruptCallMediaOperation = false, bool loop = false,
-            string operationContext = "playToAllContext")
-            => HandlePlayToAll(callConnectionId, useOptions, interruptCallMediaOperation, loop, operationContext, async: true);
-
+        public Task<IActionResult> PlayToAllAsync([FromBody] PlayToAllRequest request) => HandlePlayToAll(request, async: true);
         [HttpPost("/playToAll")]
         [Tags("Play Media")]
-        public IActionResult PlayToAll(
-            string callConnectionId,
-            bool useOptions = true,
-            bool interruptCallMediaOperation = false, bool loop = false,
-            string operationContext = "playToAllContext")
-            => HandlePlayToAll(callConnectionId, useOptions, interruptCallMediaOperation, loop, operationContext, async: false).Result;
+        public IActionResult PlayToAll([FromBody] PlayToAllRequest request) => HandlePlayToAll(request, async: false).Result;
 
-        #endregion
-
-        #region Hold – 3 overloads: HoldOptions | identifier | identifier,playSource
-
-        /// <summary>
-        /// Holds a participant.
-        /// useOptions=true  ? Hold(HoldOptions) with OperationContext and optional PlaySource.
-        /// useOptions=false ? Hold(CommunicationIdentifier) or Hold(identifier, PlaySource) simple overloads.
-        /// </summary>
-        /// <param name="callConnectionId">The call connection ID</param>
-        /// <param name="target">ACS user ID (8:...) or phone number (+...)</param>
-        /// <param name="useOptions">true = HoldOptions overload, false = simple overload</param>
-        /// <param name="playHoldMusic">When true, plays hold music</param>
-        /// <param name="operationContext">Custom context (HoldOptions only)</param>
+        /// <summary>Holds a participant. Include "holdOptions" for hold music and context. Omit for simple hold.</summary>
         [HttpPost("/holdAsync")]
         [Tags("Hold Management")]
-        public Task<IActionResult> HoldAsync(
-            string callConnectionId, string target,
-            bool useOptions = true, bool playHoldMusic = false,
-            string operationContext = "holdContext")
-            => HandleHold(callConnectionId, target, useOptions, playHoldMusic, operationContext, async: true);
-
+        public Task<IActionResult> HoldAsync([FromBody] HoldRequest request) => HandleHold(request, async: true);
         [HttpPost("/hold")]
         [Tags("Hold Management")]
-        public IActionResult Hold(
-            string callConnectionId, string target,
-            bool useOptions = true, bool playHoldMusic = false,
-            string operationContext = "holdContext")
-            => HandleHold(callConnectionId, target, useOptions, playHoldMusic, operationContext, async: false).Result;
+        public IActionResult Hold([FromBody] HoldRequest request) => HandleHold(request, async: false).Result;
 
-        #endregion
-
-        #region Unhold – 2 overloads: UnholdOptions | identifier
-
-        /// <summary>
-        /// Unholds a participant.
-        /// useOptions=true  ? Unhold(UnholdOptions).
-        /// useOptions=false ? Unhold(CommunicationIdentifier).
-        /// </summary>
+        /// <summary>Unholds a participant. Include "unholdOptions" for custom context. Omit for simple unhold.</summary>
         [HttpPost("/unholdAsync")]
         [Tags("Hold Management")]
-        public Task<IActionResult> UnholdAsync(
-            string callConnectionId, string target,
-            bool useOptions = true,
-            string operationContext = "unholdContext")
-            => HandleUnhold(callConnectionId, target, useOptions, operationContext, async: true);
-
+        public Task<IActionResult> UnholdAsync([FromBody] UnholdRequest request) => HandleUnhold(request, async: true);
         [HttpPost("/unhold")]
         [Tags("Hold Management")]
-        public IActionResult Unhold(
-            string callConnectionId, string target,
-            bool useOptions = true,
-            string operationContext = "unholdContext")
-            => HandleUnhold(callConnectionId, target, useOptions, operationContext, async: false).Result;
+        public IActionResult Unhold([FromBody] UnholdRequest request) => HandleUnhold(request, async: false).Result;
 
-        #endregion
-
-        #region StartMediaStreaming / StopMediaStreaming – options only
-
-        /// <summary>
-        /// Starts media streaming (StartMediaStreamingOptions overload).
-        /// </summary>
+        /// <summary>Starts media streaming on a call.</summary>
         [HttpPost("/startMediaStreamingAsync")]
         [Tags("Media Streaming")]
-        public Task<IActionResult> StartMediaStreamingAsync(
-            string callConnectionId,
-            string operationContext = "StartMediaStreamingContext")
-            => HandleMediaStreaming(callConnectionId, start: true, operationContext, async: true);
-
+        public Task<IActionResult> StartMediaStreamingAsync([FromBody] MediaStreamingActionRequest request) => HandleMediaStreaming(request, start: true, async: true);
         [HttpPost("/startMediaStreaming")]
         [Tags("Media Streaming")]
-        public IActionResult StartMediaStreaming(
-            string callConnectionId,
-            string operationContext = "StartMediaStreamingContext")
-            => HandleMediaStreaming(callConnectionId, start: true, operationContext, async: false).Result;
+        public IActionResult StartMediaStreaming([FromBody] MediaStreamingActionRequest request) => HandleMediaStreaming(request, start: true, async: false).Result;
 
+        /// <summary>Stops media streaming on a call.</summary>
         [HttpPost("/stopMediaStreamingAsync")]
         [Tags("Media Streaming")]
-        public Task<IActionResult> StopMediaStreamingAsync(
-            string callConnectionId,
-            string operationContext = "StopMediaStreamingContext")
-            => HandleMediaStreaming(callConnectionId, start: false, operationContext, async: true);
-
+        public Task<IActionResult> StopMediaStreamingAsync([FromBody] MediaStreamingActionRequest request) => HandleMediaStreaming(request, start: false, async: true);
         [HttpPost("/stopMediaStreaming")]
         [Tags("Media Streaming")]
-        public IActionResult StopMediaStreaming(
-            string callConnectionId,
-            string operationContext = "StopMediaStreamingContext")
-            => HandleMediaStreaming(callConnectionId, start: false, operationContext, async: false).Result;
+        public IActionResult StopMediaStreaming([FromBody] MediaStreamingActionRequest request) => HandleMediaStreaming(request, start: false, async: false).Result;
 
-        #endregion
-
-        #region CreateCallWithMediaStreaming
-
-        [HttpPost("/createCallWithMediaStreamingAsync")]
-        [Tags("Media Streaming")]
-        public Task<IActionResult> CreateCallWithMediaStreamingAsync(
-            string target, bool isMixed = true, bool enableMediaStreaming = false,
-            bool isEnableBidirectional = false, bool isPcm24kMono = false)
-            => HandleCreateCallWithMediaStreaming(target, isMixed, enableMediaStreaming, isEnableBidirectional, isPcm24kMono, async: true);
-
-        [HttpPost("/createCallWithMediaStreaming")]
-        [Tags("Media Streaming")]
-        public IActionResult CreateCallWithMediaStreaming(
-            string target, bool isMixed = true, bool enableMediaStreaming = false,
-            bool isEnableBidirectional = false, bool isPcm24kMono = false)
-            => HandleCreateCallWithMediaStreaming(target, isMixed, enableMediaStreaming, isEnableBidirectional, isPcm24kMono, async: false).Result;
-
-        #endregion
-
-        #region CancelAllMediaOperations
-
-        [HttpPost("/cancelAllMediaOperationAsync")]
+        /// <summary>Cancels all media operations on a call.</summary>
+        [HttpPost("/cancelAllMediaOperationsAsync")]
         [Tags("Media Operations")]
-        public Task<IActionResult> CancelAllMediaOperationAsync(string callConnectionId)
-            => HandleCancelAllMediaOperations(callConnectionId, async: true);
-
-        [HttpPost("/cancelAllMediaOperation")]
+        public Task<IActionResult> CancelAllMediaOperationsAsync([FromBody] MediaStreamingActionRequest request) => HandleCancelAllMediaOperations(request.CallConnectionId, async: true);
+        [HttpPost("/cancelAllMediaOperations")]
         [Tags("Media Operations")]
-        public IActionResult CancelAllMediaOperation(string callConnectionId)
-            => HandleCancelAllMediaOperations(callConnectionId, async: false).Result;
+        public IActionResult CancelAllMediaOperations([FromBody] MediaStreamingActionRequest request) => HandleCancelAllMediaOperations(request.CallConnectionId, async: false).Result;
 
-        #endregion
-
-        #region Recognize – Dtmf, Choice, Speech, SpeechOrDtmf
-
-        /// <summary>
-        /// Starts recognition via StartRecognizing(CallMediaRecognizeOptions).
-        /// </summary>
+        /// <summary>Starts recognition. Set "recognizeType" then include the matching options object.</summary>
         [HttpPost("/startRecognizeAsync")]
         [Tags("Recognition")]
-        public Task<IActionResult> StartRecognizeAsync(
-            string callConnectionId, string target,
-            string recognizeType = "Dtmf", int maxTonesToCollect = 4,
-            bool interruptPrompt = false,
-            int initialSilenceTimeoutSec = 15, int interToneTimeoutSec = 5, int endSilenceTimeoutSec = 5,
-            string operationContext = "RecognizeContext")
-            => HandleRecognize(callConnectionId, target, recognizeType, maxTonesToCollect, interruptPrompt,
-                initialSilenceTimeoutSec, interToneTimeoutSec, endSilenceTimeoutSec, operationContext, async: true);
-
+        public Task<IActionResult> StartRecognizeAsync([FromBody] StartRecognizeRequest request) => HandleRecognize(request, async: true);
         [HttpPost("/startRecognize")]
         [Tags("Recognition")]
-        public IActionResult StartRecognize(
-            string callConnectionId, string target,
-            string recognizeType = "Dtmf", int maxTonesToCollect = 4,
-            bool interruptPrompt = false,
-            int initialSilenceTimeoutSec = 15, int interToneTimeoutSec = 5, int endSilenceTimeoutSec = 5,
-            string operationContext = "RecognizeContext")
-            => HandleRecognize(callConnectionId, target, recognizeType, maxTonesToCollect, interruptPrompt,
-                initialSilenceTimeoutSec, interToneTimeoutSec, endSilenceTimeoutSec, operationContext, async: false).Result;
+        public IActionResult StartRecognize([FromBody] StartRecognizeRequest request) => HandleRecognize(request, async: false).Result;
 
-        #endregion
-
-        #region InterruptAudioAndAnnounce
-
+        /// <summary>Interrupts current audio and plays an announcement.</summary>
         [HttpPost("/interruptAudioAndAnnounceAsync")]
         [Tags("Audio Announcements")]
-        public Task<IActionResult> InterruptAudioAndAnnounceAsync(
-            string callConnectionId, string target, string operationContext = "interruptContext")
-            => HandleInterruptAudioAndAnnounce(callConnectionId, target, operationContext, async: true);
-
+        public Task<IActionResult> InterruptAudioAndAnnounceAsync([FromBody] InterruptAudioAndAnnounceRequest request) => HandleInterruptAudioAndAnnounce(request, async: true);
         [HttpPost("/interruptAudioAndAnnounce")]
         [Tags("Audio Announcements")]
-        public IActionResult InterruptAudioAndAnnounce(
-            string callConnectionId, string target, string operationContext = "interruptContext")
-            => HandleInterruptAudioAndAnnounce(callConnectionId, target, operationContext, async: false).Result;
+        public IActionResult InterruptAudioAndAnnounce([FromBody] InterruptAudioAndAnnounceRequest request) => HandleInterruptAudioAndAnnounce(request, async: false).Result;
 
-        #endregion
-
-        #region Transcription – Start/Stop/Update with 2 overloads each
-
-        /// <summary>
-        /// Starts transcription via StartTranscription(StartTranscriptionOptions).
-        /// </summary>
+        /// <summary>Starts transcription on a call.</summary>
         [HttpPost("/startTranscriptionAsync")]
         [Tags("Transcription")]
-        public Task<IActionResult> StartTranscriptionAsync(
-            string callConnectionId, string locale = "en-US", string operationContext = "StartTranscriptionContext")
-            => HandleTranscription(callConnectionId, TranscriptionAction.Start, locale, operationContext, async: true);
-
+        public Task<IActionResult> StartTranscriptionAsync([FromBody] StartTranscriptionRequest request) => HandleTranscription(request.CallConnectionId, TranscriptionAction.Start, request.Locale, request.OperationContext, async: true);
         [HttpPost("/startTranscription")]
         [Tags("Transcription")]
-        public IActionResult StartTranscription(
-            string callConnectionId, string locale = "en-US", string operationContext = "StartTranscriptionContext")
-            => HandleTranscription(callConnectionId, TranscriptionAction.Start, locale, operationContext, async: false).Result;
+        public IActionResult StartTranscription([FromBody] StartTranscriptionRequest request) => HandleTranscription(request.CallConnectionId, TranscriptionAction.Start, request.Locale, request.OperationContext, async: false).Result;
 
+        /// <summary>Stops transcription on a call.</summary>
         [HttpPost("/stopTranscriptionAsync")]
         [Tags("Transcription")]
-        public Task<IActionResult> StopTranscriptionAsync(
-            string callConnectionId, string operationContext = "StopTranscriptionContext")
-            => HandleTranscription(callConnectionId, TranscriptionAction.Stop, null, operationContext, async: true);
-
+        public Task<IActionResult> StopTranscriptionAsync([FromBody] StopTranscriptionRequest request) => HandleTranscription(request.CallConnectionId, TranscriptionAction.Stop, null, request.OperationContext, async: true);
         [HttpPost("/stopTranscription")]
         [Tags("Transcription")]
-        public IActionResult StopTranscription(
-            string callConnectionId, string operationContext = "StopTranscriptionContext")
-            => HandleTranscription(callConnectionId, TranscriptionAction.Stop, null, operationContext, async: false).Result;
+        public IActionResult StopTranscription([FromBody] StopTranscriptionRequest request) => HandleTranscription(request.CallConnectionId, TranscriptionAction.Stop, null, request.OperationContext, async: false).Result;
 
-        /// <summary>
-        /// Updates transcription locale.
-        /// useOptions=true  ? UpdateTranscription(UpdateTranscriptionOptions).
-        /// useOptions=false ? UpdateTranscription(string locale).
-        /// </summary>
+        /// <summary>Updates transcription locale on a call.</summary>
         [HttpPost("/updateTranscriptionAsync")]
         [Tags("Transcription")]
-        public Task<IActionResult> UpdateTranscriptionAsync(
-            string callConnectionId, string locale = "en-US", bool useOptions = false,
-            string operationContext = "UpdateTranscriptionContext")
-            => HandleUpdateTranscription(callConnectionId, locale, useOptions, operationContext, async: true);
-
+        public Task<IActionResult> UpdateTranscriptionAsync([FromBody] UpdateTranscriptionRequest request) => HandleUpdateTranscription(request, async: true);
         [HttpPost("/updateTranscription")]
         [Tags("Transcription")]
-        public IActionResult UpdateTranscription(
-            string callConnectionId, string locale = "en-US", bool useOptions = false,
-            string operationContext = "UpdateTranscriptionContext")
-            => HandleUpdateTranscription(callConnectionId, locale, useOptions, operationContext, async: false).Result;
+        public IActionResult UpdateTranscription([FromBody] UpdateTranscriptionRequest request) => HandleUpdateTranscription(request, async: false).Result;
 
-        #endregion
-
-        #region SendDtmfTones – 2 overloads: SendDtmfTonesOptions | (tones, identifier)
-
-        /// <summary>
-        /// useOptions=true  ? SendDtmfTones(SendDtmfTonesOptions).
-        /// useOptions=false ? SendDtmfTones(tones, identifier).
-        /// </summary>
+        /// <summary>Sends DTMF tones to a participant.</summary>
         [HttpPost("/sendDtmfTonesAsync")]
         [Tags("Send DTMF")]
-        public Task<IActionResult> SendDtmfTonesAsync(
-            string callConnectionId, string target, string tones = "zero,one",
-            bool useOptions = false, string operationContext = "SendDtmfContext")
-            => HandleSendDtmfTones(callConnectionId, target, tones, useOptions, operationContext, async: true);
-
+        public Task<IActionResult> SendDtmfTonesAsync([FromBody] SendDtmfTonesRequest request) => HandleSendDtmfTones(request, async: true);
         [HttpPost("/sendDtmfTones")]
         [Tags("Send DTMF")]
-        public IActionResult SendDtmfTones(
-            string callConnectionId, string target, string tones = "zero,one",
-            bool useOptions = false, string operationContext = "SendDtmfContext")
-            => HandleSendDtmfTones(callConnectionId, target, tones, useOptions, operationContext, async: false).Result;
+        public IActionResult SendDtmfTones([FromBody] SendDtmfTonesRequest request) => HandleSendDtmfTones(request, async: false).Result;
 
-        #endregion
-
-        #region ContinuousDtmf – 2 overloads each: identifier | ContinuousDtmfRecognitionOptions
-
-        /// <summary>
-        /// useOptions=true  ? Start/StopContinuousDtmfRecognition(ContinuousDtmfRecognitionOptions).
-        /// useOptions=false ? Start/StopContinuousDtmfRecognition(CommunicationIdentifier).
-        /// </summary>
+        /// <summary>Starts continuous DTMF recognition.</summary>
         [HttpPost("/startContinuousDtmfAsync")]
         [Tags("Continuous DTMF")]
-        public Task<IActionResult> StartContinuousDtmfAsync(
-            string callConnectionId, string target,
-            bool useOptions = false, string operationContext = "StartContinuousDtmfContext")
-            => HandleContinuousDtmf(callConnectionId, target, start: true, useOptions, operationContext, async: true);
-
+        public Task<IActionResult> StartContinuousDtmfAsync([FromBody] ContinuousDtmfRequest request) => HandleContinuousDtmf(request, start: true, async: true);
         [HttpPost("/startContinuousDtmf")]
         [Tags("Continuous DTMF")]
-        public IActionResult StartContinuousDtmf(
-            string callConnectionId, string target,
-            bool useOptions = false, string operationContext = "StartContinuousDtmfContext")
-            => HandleContinuousDtmf(callConnectionId, target, start: true, useOptions, operationContext, async: false).Result;
+        public IActionResult StartContinuousDtmf([FromBody] ContinuousDtmfRequest request) => HandleContinuousDtmf(request, start: true, async: false).Result;
 
+        /// <summary>Stops continuous DTMF recognition.</summary>
         [HttpPost("/stopContinuousDtmfAsync")]
         [Tags("Continuous DTMF")]
-        public Task<IActionResult> StopContinuousDtmfAsync(
-            string callConnectionId, string target,
-            bool useOptions = false, string operationContext = "StopContinuousDtmfContext")
-            => HandleContinuousDtmf(callConnectionId, target, start: false, useOptions, operationContext, async: true);
-
+        public Task<IActionResult> StopContinuousDtmfAsync([FromBody] ContinuousDtmfRequest request) => HandleContinuousDtmf(request, start: false, async: true);
         [HttpPost("/stopContinuousDtmf")]
         [Tags("Continuous DTMF")]
-        public IActionResult StopContinuousDtmf(
-            string callConnectionId, string target,
-            bool useOptions = false, string operationContext = "StopContinuousDtmfContext")
-            => HandleContinuousDtmf(callConnectionId, target, start: false, useOptions, operationContext, async: false).Result;
+        public IActionResult StopContinuousDtmf([FromBody] ContinuousDtmfRequest request) => HandleContinuousDtmf(request, start: false, async: false).Result;
 
-        #endregion
-
-        // ???????????????????????????????????????????????????????????????????????????
-        //  PRIVATE HANDLERS
-        // ???????????????????????????????????????????????????????????????????????????
+        // ??? PRIVATE HANDLERS ???????????????????????????????????????????????????
 
         private FileSource BuildFileSource() => new FileSource(new Uri(_config.CallbackUriHost + "/audio/prompt.wav"));
 
-        // ?? Play ????????????????????????????????????????????????????????????????????
-
-        private async Task<IActionResult> HandlePlay(
-            string callConnectionId, string target,
-            bool useOptions, bool interruptHoldAudio, bool loop,
-            string operationContext, bool async)
+        private async Task<IActionResult> HandlePlay(PlayRequest request, bool async)
         {
-            var identifier = ResolveIdentifier(target);
+            var identifier = ResolveIdentifier(request.Target);
             if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
 
-            _logger.LogInformation("Play. CallId={CallId}, Target={Target}, UseOptions={UseOptions}", callConnectionId, target, useOptions);
+            _logger.LogInformation("Play. CallId={CallId}, Target={Target}", request.CallConnectionId, request.Target);
             try
             {
-                var callMedia = _service.GetCallMedia(callConnectionId);
-                var props = _service.GetCallConnectionProperties(callConnectionId);
+                var callMedia = _service.GetCallMedia(request.CallConnectionId);
+                var props = _service.GetCallConnectionProperties(request.CallConnectionId);
                 var fileSource = BuildFileSource();
                 var targets = new List<CommunicationIdentifier> { identifier };
 
                 Response<PlayResult> result;
-                if (useOptions)
+                if (request.PlayOptions != null)
                 {
-                    // Overload: Play(PlayOptions, CancellationToken)
+                    var po = request.PlayOptions;
                     var opts = new PlayOptions(fileSource, targets)
-                    {
-                        OperationContext = operationContext,
-                        InterruptHoldAudio = interruptHoldAudio,
-                        Loop = loop
-                    };
+                    { OperationContext = po.OperationContext, InterruptHoldAudio = po.InterruptHoldAudio, Loop = po.Loop };
                     result = async ? await callMedia.PlayAsync(opts) : callMedia.Play(opts);
                 }
                 else
                 {
-                    // Overload: Play(PlaySource, IEnumerable<CommunicationIdentifier>, CancellationToken)
                     result = async ? await callMedia.PlayAsync(fileSource, targets) : callMedia.Play(fileSource, targets);
                 }
 
-                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = result.GetRawResponse().Status.ToString() });
+                return Ok(new CallConnectionResponse { CallConnectionId = request.CallConnectionId, CorrelationId = props.CorrelationId, Status = result.GetRawResponse().Status.ToString() });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in Play");
-                return Problem($"Failed to play: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error in Play"); return Problem($"Failed to play: {ex.Message}"); }
         }
 
-        // ?? PlayToAll ???????????????????????????????????????????????????????????????
-
-        private async Task<IActionResult> HandlePlayToAll(
-            string callConnectionId,
-            bool useOptions, bool interruptCallMediaOperation, bool loop,
-            string operationContext, bool async)
+        private async Task<IActionResult> HandlePlayToAll(PlayToAllRequest request, bool async)
         {
-            _logger.LogInformation("PlayToAll. CallId={CallId}, UseOptions={UseOptions}", callConnectionId, useOptions);
+            _logger.LogInformation("PlayToAll. CallId={CallId}", request.CallConnectionId);
             try
             {
-                var callMedia = _service.GetCallMedia(callConnectionId);
-                var props = _service.GetCallConnectionProperties(callConnectionId);
+                var callMedia = _service.GetCallMedia(request.CallConnectionId);
+                var props = _service.GetCallConnectionProperties(request.CallConnectionId);
                 var fileSource = BuildFileSource();
 
                 Response<PlayResult> result;
-                if (useOptions)
+                if (request.PlayToAllOptions != null)
                 {
-                    // Overload: PlayToAll(PlayToAllOptions, CancellationToken)
+                    var po = request.PlayToAllOptions;
                     var opts = new PlayToAllOptions(fileSource)
-                    {
-                        OperationContext = operationContext,
-                        InterruptCallMediaOperation = interruptCallMediaOperation,
-                        Loop = loop
-                    };
+                    { OperationContext = po.OperationContext, InterruptCallMediaOperation = po.InterruptCallMediaOperation, Loop = po.Loop };
                     result = async ? await callMedia.PlayToAllAsync(opts) : callMedia.PlayToAll(opts);
                 }
                 else
                 {
-                    // Overload: PlayToAll(PlaySource, CancellationToken)
                     result = async ? await callMedia.PlayToAllAsync(fileSource) : callMedia.PlayToAll(fileSource);
                 }
 
-                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = result.GetRawResponse().Status.ToString() });
+                return Ok(new CallConnectionResponse { CallConnectionId = request.CallConnectionId, CorrelationId = props.CorrelationId, Status = result.GetRawResponse().Status.ToString() });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in PlayToAll");
-                return Problem($"Failed to play to all: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error in PlayToAll"); return Problem($"Failed to play to all: {ex.Message}"); }
         }
 
-        // ?? Hold ????????????????????????????????????????????????????????????????????
-
-        private async Task<IActionResult> HandleHold(
-            string callConnectionId, string target,
-            bool useOptions, bool playHoldMusic, string operationContext, bool async)
+        private async Task<IActionResult> HandleHold(HoldRequest request, bool async)
         {
-            var identifier = ResolveIdentifier(target);
+            var identifier = ResolveIdentifier(request.Target);
             if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
 
-            _logger.LogInformation("Hold. CallId={CallId}, Target={Target}, UseOptions={UseOptions}, PlayMusic={PlayMusic}",
-                callConnectionId, target, useOptions, playHoldMusic);
+            _logger.LogInformation("Hold. CallId={CallId}, Target={Target}", request.CallConnectionId, request.Target);
             try
             {
-                var callMedia = _service.GetCallMedia(callConnectionId);
-                var props = _service.GetCallConnectionProperties(callConnectionId);
+                var callMedia = _service.GetCallMedia(request.CallConnectionId);
+                var props = _service.GetCallConnectionProperties(request.CallConnectionId);
 
-                if (useOptions)
+                if (request.HoldOptions != null)
                 {
-                    // Overload: Hold(HoldOptions, CancellationToken)
-                    var opts = new HoldOptions(identifier) { OperationContext = operationContext };
-                    if (playHoldMusic) opts.PlaySource = BuildFileSource();
+                    var ho = request.HoldOptions;
+                    var opts = new HoldOptions(identifier) { OperationContext = ho.OperationContext };
+                    if (ho.PlayHoldMusic) opts.PlaySource = BuildFileSource();
                     if (async) await callMedia.HoldAsync(opts); else callMedia.Hold(opts);
-                }
-                else if (playHoldMusic)
-                {
-                    // Overload: Hold(CommunicationIdentifier, PlaySource, CancellationToken)
-                    if (async) await callMedia.HoldAsync(identifier, BuildFileSource());
-                    else callMedia.Hold(identifier, BuildFileSource());
                 }
                 else
                 {
-                    // Overload: Hold(CommunicationIdentifier, CancellationToken)
                     if (async) await callMedia.HoldAsync(identifier); else callMedia.Hold(identifier);
                 }
 
-                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
+                return Ok(new CallConnectionResponse { CallConnectionId = request.CallConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in Hold");
-                return Problem($"Failed to hold: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error in Hold"); return Problem($"Failed to hold: {ex.Message}"); }
         }
 
-        // ?? Unhold ??????????????????????????????????????????????????????????????????
-
-        private async Task<IActionResult> HandleUnhold(
-            string callConnectionId, string target,
-            bool useOptions, string operationContext, bool async)
+        private async Task<IActionResult> HandleUnhold(UnholdRequest request, bool async)
         {
-            var identifier = ResolveIdentifier(target);
+            var identifier = ResolveIdentifier(request.Target);
             if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
 
-            _logger.LogInformation("Unhold. CallId={CallId}, Target={Target}, UseOptions={UseOptions}", callConnectionId, target, useOptions);
+            _logger.LogInformation("Unhold. CallId={CallId}, Target={Target}", request.CallConnectionId, request.Target);
             try
             {
-                var callMedia = _service.GetCallMedia(callConnectionId);
-                var props = _service.GetCallConnectionProperties(callConnectionId);
+                var callMedia = _service.GetCallMedia(request.CallConnectionId);
+                var props = _service.GetCallConnectionProperties(request.CallConnectionId);
 
-                if (useOptions)
+                if (request.UnholdOptions != null)
                 {
-                    // Overload: Unhold(UnholdOptions, CancellationToken)
-                    var opts = new UnholdOptions(identifier) { OperationContext = operationContext };
+                    var opts = new UnholdOptions(identifier) { OperationContext = request.UnholdOptions.OperationContext };
                     if (async) await callMedia.UnholdAsync(opts); else callMedia.Unhold(opts);
                 }
                 else
                 {
-                    // Overload: Unhold(CommunicationIdentifier, CancellationToken)
                     if (async) await callMedia.UnholdAsync(identifier); else callMedia.Unhold(identifier);
                 }
 
-                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
+                return Ok(new CallConnectionResponse { CallConnectionId = request.CallConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in Unhold");
-                return Problem($"Failed to unhold: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error in Unhold"); return Problem($"Failed to unhold: {ex.Message}"); }
         }
 
-        // ?? MediaStreaming ??????????????????????????????????????????????????????????
-
-        private async Task<IActionResult> HandleMediaStreaming(
-            string callConnectionId, bool start, string operationContext, bool async)
+        private async Task<IActionResult> HandleMediaStreaming(MediaStreamingActionRequest request, bool start, bool async)
         {
-            _logger.LogInformation("{Action} media streaming. CallId={CallId}", start ? "Starting" : "Stopping", callConnectionId);
+            _logger.LogInformation("{Action} media streaming. CallId={CallId}", start ? "Starting" : "Stopping", request.CallConnectionId);
             try
             {
-                var callMedia = _service.GetCallMedia(callConnectionId);
-                var props = _service.GetCallConnectionProperties(callConnectionId);
+                var callMedia = _service.GetCallMedia(request.CallConnectionId);
+                var props = _service.GetCallConnectionProperties(request.CallConnectionId);
                 var callbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks");
                 Response response;
 
                 if (start)
                 {
-                    var opts = new StartMediaStreamingOptions { OperationContext = operationContext, OperationCallbackUri = callbackUri };
+                    var opts = new StartMediaStreamingOptions { OperationContext = request.OperationContext, OperationCallbackUri = callbackUri };
                     response = async ? await callMedia.StartMediaStreamingAsync(opts) : callMedia.StartMediaStreaming(opts);
                 }
                 else
                 {
-                    var opts = new StopMediaStreamingOptions { OperationContext = operationContext, OperationCallbackUri = callbackUri };
+                    var opts = new StopMediaStreamingOptions { OperationContext = request.OperationContext, OperationCallbackUri = callbackUri };
                     response = async ? await callMedia.StopMediaStreamingAsync(opts) : callMedia.StopMediaStreaming(opts);
                 }
 
-                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = response.Status.ToString() });
+                return Ok(new CallConnectionResponse { CallConnectionId = request.CallConnectionId, CorrelationId = props.CorrelationId, Status = response.Status.ToString() });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during media streaming operation");
-                return Problem($"Failed media streaming operation: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error during media streaming operation"); return Problem($"Failed media streaming operation: {ex.Message}"); }
         }
-
-        // ?? CreateCallWithMediaStreaming ?????????????????????????????????????????????
-
-        private async Task<IActionResult> HandleCreateCallWithMediaStreaming(
-            string target, bool isMixed, bool enableMediaStreaming,
-            bool enableBidirectional, bool pcm24kMono, bool async)
-        {
-            if (string.IsNullOrEmpty(target)) return BadRequest("Target is required");
-            var identifier = ResolveIdentifier(target);
-            if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
-
-            bool isPstn = target.StartsWith("+");
-            var audioChannel = isMixed ? MediaStreamingAudioChannel.Mixed : MediaStreamingAudioChannel.Unmixed;
-            _logger.LogInformation("CreateCallWithMediaStreaming. Target={Target}, Channel={Channel}", target, audioChannel);
-            try
-            {
-                var callbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks");
-                var websocketUri = _config.CallbackUriHost.Replace("https", "wss") + "/ws";
-
-                var mediaOpts = new MediaStreamingOptions(
-                    new Uri(websocketUri), MediaStreamingContent.Audio, audioChannel,
-                    MediaStreamingTransport.Websocket, enableMediaStreaming)
-                {
-                    EnableBidirectional = enableBidirectional,
-                    AudioFormat = pcm24kMono ? AudioFormat.Pcm24KMono : AudioFormat.Pcm16KMono
-                };
-
-                var invite = isPstn
-                    ? new CallInvite(new PhoneNumberIdentifier(target), new PhoneNumberIdentifier(_config.AcsPhoneNumber))
-                    : new CallInvite(new CommunicationUserIdentifier(target));
-
-                var createOpts = new CreateCallOptions(invite, callbackUri) { MediaStreamingOptions = mediaOpts };
-                var result = async
-                    ? await _service.GetCallAutomationClient().CreateCallAsync(createOpts)
-                    : _service.GetCallAutomationClient().CreateCall(createOpts);
-
-                var props = result.Value.CallConnectionProperties;
-                return Ok(new CallConnectionResponse { CallConnectionId = props.CallConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error creating call with media streaming");
-                return Problem($"Failed to create call with media streaming: {ex.Message}");
-            }
-        }
-
-        // ?? CancelAllMediaOperations ????????????????????????????????????????????????
 
         private async Task<IActionResult> HandleCancelAllMediaOperations(string callConnectionId, bool async)
         {
@@ -633,103 +301,118 @@ namespace Call_Automation_GCCH.Controllers
                 var result = async ? await callMedia.CancelAllMediaOperationsAsync() : callMedia.CancelAllMediaOperations();
                 return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = result.GetRawResponse().Status.ToString() });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error cancelling all media operations");
-                return Problem($"Failed to cancel all media operations: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error cancelling all media operations"); return Problem($"Failed to cancel all media operations: {ex.Message}"); }
         }
 
-        // ?? Recognize ???????????????????????????????????????????????????????????????
-
-        private async Task<IActionResult> HandleRecognize(
-            string callConnectionId, string target, string recognizeType,
-            int maxTonesToCollect, bool interruptPrompt,
-            int initialSilenceTimeoutSec, int interToneTimeoutSec, int endSilenceTimeoutSec,
-            string operationContext, bool async)
+        private async Task<IActionResult> HandleRecognize(StartRecognizeRequest request, bool async)
         {
-            var identifier = ResolveIdentifier(target);
-            if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
-            if (!Enum.TryParse<RecognizeType>(recognizeType, ignoreCase: true, out var type))
-                return BadRequest($"Invalid recognizeType '{recognizeType}'. Valid: Dtmf, Choice, Speech, SpeechOrDtmf");
+            if (string.IsNullOrEmpty(request.CallConnectionId))
+                return BadRequest("callConnectionId is required");
 
-            _logger.LogInformation("Recognize. CallId={CallId}, Type={Type}", callConnectionId, type);
+            var identifier = ResolveIdentifier(request.Target);
+            if (identifier == null)
+                return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
+
+            if (!Enum.TryParse<RecognizeType>(request.RecognizeType, ignoreCase: true, out var type))
+                return BadRequest($"Invalid recognizeType '{request.RecognizeType}'. Valid: Dtmf, Choice, Speech, SpeechOrDtmf");
+
+            _logger.LogInformation("Recognize. CallId={CallId}, Type={Type}", request.CallConnectionId, type);
             try
             {
-                var callMedia = _service.GetCallMedia(callConnectionId);
-                var props = _service.GetCallConnectionProperties(callConnectionId);
+                var callMedia = _service.GetCallMedia(request.CallConnectionId);
+                var props = _service.GetCallConnectionProperties(request.CallConnectionId);
                 var fileSource = BuildFileSource();
 
                 switch (type)
                 {
                     case RecognizeType.Dtmf:
-                        var dtmfOpts = new CallMediaRecognizeDtmfOptions(identifier, maxTonesToCollect: maxTonesToCollect)
-                        { Prompt = fileSource, InterruptPrompt = interruptPrompt, InitialSilenceTimeout = TimeSpan.FromSeconds(initialSilenceTimeoutSec), InterToneTimeout = TimeSpan.FromSeconds(interToneTimeoutSec), OperationContext = operationContext };
+                    {
+                        var d = request.DtmfOptions ?? new DtmfOptionsRequest();
+                        var dtmfOpts = new CallMediaRecognizeDtmfOptions(identifier, maxTonesToCollect: d.MaxTonesToCollect)
+                        {
+                            Prompt = fileSource, InterruptPrompt = request.InterruptPrompt,
+                            InitialSilenceTimeout = TimeSpan.FromSeconds(request.InitialSilenceTimeoutSec),
+                            InterToneTimeout = TimeSpan.FromSeconds(d.InterToneTimeoutSec),
+                            OperationContext = request.OperationContext
+                        };
+                        if (!string.IsNullOrEmpty(d.StopTones))
+                        {
+                            var parsed = ParseTones(d.StopTones);
+                            if (parsed != null) foreach (var t in parsed) dtmfOpts.StopTones.Add(t);
+                        }
                         if (async) await callMedia.StartRecognizingAsync(dtmfOpts); else callMedia.StartRecognizing(dtmfOpts);
                         break;
+                    }
                     case RecognizeType.Choice:
-                        var choiceOpts = new CallMediaRecognizeChoiceOptions(identifier, GetChoices())
-                        { Prompt = fileSource, InterruptPrompt = interruptPrompt, InitialSilenceTimeout = TimeSpan.FromSeconds(initialSilenceTimeoutSec), OperationContext = operationContext };
+                    {
+                        if (request.ChoiceOptions == null || request.ChoiceOptions.Choices.Count == 0)
+                            return BadRequest("choiceOptions with at least one choice is required for recognizeType 'Choice'.");
+                        var choices = request.ChoiceOptions.Choices.Select(c => new RecognitionChoice(c.Label, c.Phrases)).ToList();
+                        var choiceOpts = new CallMediaRecognizeChoiceOptions(identifier, choices)
+                        {
+                            Prompt = fileSource, InterruptPrompt = request.InterruptPrompt,
+                            InitialSilenceTimeout = TimeSpan.FromSeconds(request.InitialSilenceTimeoutSec),
+                            OperationContext = request.OperationContext
+                        };
                         if (async) await callMedia.StartRecognizingAsync(choiceOpts); else callMedia.StartRecognizing(choiceOpts);
                         break;
+                    }
                     case RecognizeType.Speech:
+                    {
+                        var s = request.SpeechOptions ?? new SpeechOptionsRequest();
                         var speechOpts = new CallMediaRecognizeSpeechOptions(identifier)
-                        { Prompt = fileSource, InterruptPrompt = interruptPrompt, InitialSilenceTimeout = TimeSpan.FromSeconds(initialSilenceTimeoutSec), EndSilenceTimeout = TimeSpan.FromSeconds(endSilenceTimeoutSec), OperationContext = operationContext };
+                        {
+                            Prompt = fileSource, InterruptPrompt = request.InterruptPrompt,
+                            InitialSilenceTimeout = TimeSpan.FromSeconds(request.InitialSilenceTimeoutSec),
+                            EndSilenceTimeout = TimeSpan.FromSeconds(s.EndSilenceTimeoutSec),
+                            OperationContext = request.OperationContext
+                        };
+                        if (!string.IsNullOrEmpty(s.SpeechLanguage)) speechOpts.SpeechLanguage = s.SpeechLanguage;
                         if (async) await callMedia.StartRecognizingAsync(speechOpts); else callMedia.StartRecognizing(speechOpts);
                         break;
+                    }
                     case RecognizeType.SpeechOrDtmf:
-                        var bothOpts = new CallMediaRecognizeSpeechOrDtmfOptions(identifier, maxTonesToCollect)
-                        { Prompt = fileSource, InterruptPrompt = interruptPrompt, InitialSilenceTimeout = TimeSpan.FromSeconds(initialSilenceTimeoutSec), EndSilenceTimeout = TimeSpan.FromSeconds(endSilenceTimeoutSec), OperationContext = operationContext };
+                    {
+                        var sd = request.SpeechOrDtmfOptions ?? new SpeechOrDtmfOptionsRequest();
+                        var bothOpts = new CallMediaRecognizeSpeechOrDtmfOptions(identifier, sd.MaxTonesToCollect)
+                        {
+                            Prompt = fileSource, InterruptPrompt = request.InterruptPrompt,
+                            InitialSilenceTimeout = TimeSpan.FromSeconds(request.InitialSilenceTimeoutSec),
+                            EndSilenceTimeout = TimeSpan.FromSeconds(sd.EndSilenceTimeoutSec),
+                            InterToneTimeout = TimeSpan.FromSeconds(sd.InterToneTimeoutSec),
+                            OperationContext = request.OperationContext
+                        };
+                        if (!string.IsNullOrEmpty(sd.SpeechLanguage)) bothOpts.SpeechLanguage = sd.SpeechLanguage;
                         if (async) await callMedia.StartRecognizingAsync(bothOpts); else callMedia.StartRecognizing(bothOpts);
                         break;
+                    }
                 }
 
-                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
+                return Ok(new CallConnectionResponse { CallConnectionId = request.CallConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during recognition");
-                return Problem($"Failed to start recognition: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error during recognition"); return Problem($"Failed to start recognition: {ex.Message}"); }
         }
 
-        private IEnumerable<RecognitionChoice> GetChoices() =>
-            new List<RecognitionChoice>
-            {
-                new RecognitionChoice("yes", new[] { "yes", "yeah" }),
-                new RecognitionChoice("no", new[] { "no", "nope" })
-            };
-
-        // ?? InterruptAudioAndAnnounce ???????????????????????????????????????????????
-
-        private async Task<IActionResult> HandleInterruptAudioAndAnnounce(
-            string callConnectionId, string target, string operationContext, bool async)
+        private async Task<IActionResult> HandleInterruptAudioAndAnnounce(InterruptAudioAndAnnounceRequest request, bool async)
         {
-            var identifier = ResolveIdentifier(target);
+            var identifier = ResolveIdentifier(request.Target);
             if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
 
-            _logger.LogInformation("InterruptAudioAndAnnounce. CallId={CallId}, Target={Target}", callConnectionId, target);
+            _logger.LogInformation("InterruptAudioAndAnnounce. CallId={CallId}, Target={Target}", request.CallConnectionId, request.Target);
             try
             {
-                var callMedia = _service.GetCallMedia(callConnectionId);
-                var props = _service.GetCallConnectionProperties(callConnectionId);
-                var opts = new InterruptAudioAndAnnounceOptions(BuildFileSource(), identifier) { OperationContext = operationContext };
+                var callMedia = _service.GetCallMedia(request.CallConnectionId);
+                var props = _service.GetCallConnectionProperties(request.CallConnectionId);
+                var opts = new InterruptAudioAndAnnounceOptions(BuildFileSource(), identifier) { OperationContext = request.OperationContext };
                 if (async) await callMedia.InterruptAudioAndAnnounceAsync(opts); else callMedia.InterruptAudioAndAnnounce(opts);
-                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
+                return Ok(new CallConnectionResponse { CallConnectionId = request.CallConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in InterruptAudioAndAnnounce");
-                return Problem($"Failed to interrupt audio and announce: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error in InterruptAudioAndAnnounce"); return Problem($"Failed to interrupt audio and announce: {ex.Message}"); }
         }
-
-        // ?? Transcription ???????????????????????????????????????????????????????????
 
         private enum TranscriptionAction { Start, Stop }
 
-        private async Task<IActionResult> HandleTranscription(
-            string callConnectionId, TranscriptionAction action, string? locale, string operationContext, bool async)
+        private async Task<IActionResult> HandleTranscription(string callConnectionId, TranscriptionAction action, string? locale, string operationContext, bool async)
         {
             _logger.LogInformation("{Action} transcription. CallId={CallId}, Locale={Locale}", action, callConnectionId, locale);
             try
@@ -750,143 +433,70 @@ namespace Call_Automation_GCCH.Controllers
 
                 return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during transcription {Action}", action);
-                return Problem($"Failed to {action.ToString().ToLower()} transcription: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error during transcription {Action}", action); return Problem($"Failed to {action.ToString().ToLower()} transcription: {ex.Message}"); }
         }
 
-        private async Task<IActionResult> HandleUpdateTranscription(
-            string callConnectionId, string locale, bool useOptions, string operationContext, bool async)
+        private async Task<IActionResult> HandleUpdateTranscription(UpdateTranscriptionRequest request, bool async)
         {
-            _logger.LogInformation("UpdateTranscription. CallId={CallId}, Locale={Locale}, UseOptions={UseOptions}", callConnectionId, locale, useOptions);
+            _logger.LogInformation("UpdateTranscription. CallId={CallId}, Locale={Locale}", request.CallConnectionId, request.Locale);
             try
             {
-                var callMedia = _service.GetCallMedia(callConnectionId);
-                var props = _service.GetCallConnectionProperties(callConnectionId);
-
-                if (useOptions)
-                {
-                    // Overload: UpdateTranscription(UpdateTranscriptionOptions, CancellationToken)
-                    var opts = new UpdateTranscriptionOptions(locale) { OperationContext = operationContext };
-                    if (async) await callMedia.UpdateTranscriptionAsync(opts); else callMedia.UpdateTranscription(opts);
-                }
-                else
-                {
-                    // Overload: UpdateTranscription(string locale, CancellationToken)
-                    if (async) await callMedia.UpdateTranscriptionAsync(locale); else callMedia.UpdateTranscription(locale);
-                }
-
-                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
+                var callMedia = _service.GetCallMedia(request.CallConnectionId);
+                var props = _service.GetCallConnectionProperties(request.CallConnectionId);
+                var opts = new UpdateTranscriptionOptions(request.Locale) { OperationContext = request.OperationContext };
+                if (async) await callMedia.UpdateTranscriptionAsync(opts); else callMedia.UpdateTranscription(opts);
+                return Ok(new CallConnectionResponse { CallConnectionId = request.CallConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error updating transcription");
-                return Problem($"Failed to update transcription: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error updating transcription"); return Problem($"Failed to update transcription: {ex.Message}"); }
         }
 
-        // ?? SendDtmfTones ???????????????????????????????????????????????????????????
-
-        private async Task<IActionResult> HandleSendDtmfTones(
-            string callConnectionId, string target, string tones,
-            bool useOptions, string operationContext, bool async)
+        private async Task<IActionResult> HandleSendDtmfTones(SendDtmfTonesRequest request, bool async)
         {
-            if (string.IsNullOrEmpty(callConnectionId)) return BadRequest("callConnectionId is required");
-            var parsedTones = ParseTones(tones);
+            if (string.IsNullOrEmpty(request.CallConnectionId)) return BadRequest("callConnectionId is required");
+            var parsedTones = ParseTones(request.Tones);
             if (parsedTones == null || parsedTones.Count == 0)
                 return BadRequest("At least one valid tone is required. Valid: zero-nine, pound, asterisk (or 0-9, #, *)");
-            var identifier = ResolveIdentifier(target);
+            var identifier = ResolveIdentifier(request.Target);
             if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
 
-            _logger.LogInformation("SendDtmfTones [{Tones}]. CallId={CallId}, UseOptions={UseOptions}", string.Join(",", parsedTones), callConnectionId, useOptions);
+            _logger.LogInformation("SendDtmfTones [{Tones}]. CallId={CallId}", string.Join(",", parsedTones), request.CallConnectionId);
             try
             {
-                var callMedia = _service.GetCallMedia(callConnectionId);
+                var callMedia = _service.GetCallMedia(request.CallConnectionId);
+                var opts = new SendDtmfTonesOptions(parsedTones, identifier)
+                { OperationContext = request.OperationContext, OperationCallbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks") };
+                if (async) await callMedia.SendDtmfTonesAsync(opts); else callMedia.SendDtmfTones(opts);
 
-                if (useOptions)
-                {
-                    // Overload: SendDtmfTones(SendDtmfTonesOptions, CancellationToken)
-                    var opts = new SendDtmfTonesOptions(parsedTones, identifier)
-                    { OperationContext = operationContext, OperationCallbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks") };
-                    if (async) await callMedia.SendDtmfTonesAsync(opts); else callMedia.SendDtmfTones(opts);
-                }
-                else
-                {
-                    // Overload: SendDtmfTones(IEnumerable<DtmfTone>, CommunicationIdentifier, CancellationToken)
-                    if (async) await callMedia.SendDtmfTonesAsync(parsedTones, identifier);
-                    else callMedia.SendDtmfTones(parsedTones, identifier);
-                }
-
-                var props = _service.GetCallConnectionProperties(callConnectionId);
-                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
+                var props = _service.GetCallConnectionProperties(request.CallConnectionId);
+                return Ok(new CallConnectionResponse { CallConnectionId = request.CallConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error sending DTMF tones");
-                return Problem($"Failed to send DTMF tones: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error sending DTMF tones"); return Problem($"Failed to send DTMF tones: {ex.Message}"); }
         }
 
-        // ?? ContinuousDtmf ?????????????????????????????????????????????????????????
-
-        private async Task<IActionResult> HandleContinuousDtmf(
-            string callConnectionId, string target, bool start,
-            bool useOptions, string operationContext, bool async)
+        private async Task<IActionResult> HandleContinuousDtmf(ContinuousDtmfRequest request, bool start, bool async)
         {
-            if (string.IsNullOrEmpty(callConnectionId)) return BadRequest("callConnectionId is required");
-            var identifier = ResolveIdentifier(target);
+            if (string.IsNullOrEmpty(request.CallConnectionId)) return BadRequest("callConnectionId is required");
+            var identifier = ResolveIdentifier(request.Target);
             if (identifier == null) return BadRequest("target must be an ACS user ID (8:...) or phone number (+...)");
 
-            var action = start ? "Starting" : "Stopping";
-            _logger.LogInformation("{Action} continuous DTMF. CallId={CallId}, UseOptions={UseOptions}", action, callConnectionId, useOptions);
+            _logger.LogInformation("{Action} continuous DTMF. CallId={CallId}", start ? "Starting" : "Stopping", request.CallConnectionId);
             try
             {
-                var callMedia = _service.GetCallMedia(callConnectionId);
+                var callMedia = _service.GetCallMedia(request.CallConnectionId);
+                var opts = new ContinuousDtmfRecognitionOptions(identifier) { OperationContext = request.OperationContext };
 
                 if (start)
-                {
-                    if (useOptions)
-                    {
-                        // Overload: StartContinuousDtmfRecognition(ContinuousDtmfRecognitionOptions, CancellationToken)
-                        var opts = new ContinuousDtmfRecognitionOptions(identifier) { OperationContext = operationContext };
-                        if (async) await callMedia.StartContinuousDtmfRecognitionAsync(opts); else callMedia.StartContinuousDtmfRecognition(opts);
-                    }
-                    else
-                    {
-                        // Overload: StartContinuousDtmfRecognition(CommunicationIdentifier, CancellationToken)
-                        if (async) await callMedia.StartContinuousDtmfRecognitionAsync(identifier);
-                        else callMedia.StartContinuousDtmfRecognition(identifier);
-                    }
-                }
+                    if (async) await callMedia.StartContinuousDtmfRecognitionAsync(opts); else callMedia.StartContinuousDtmfRecognition(opts);
                 else
-                {
-                    if (useOptions)
-                    {
-                        var opts = new ContinuousDtmfRecognitionOptions(identifier) { OperationContext = operationContext };
-                        if (async) await callMedia.StopContinuousDtmfRecognitionAsync(opts); else callMedia.StopContinuousDtmfRecognition(opts);
-                    }
-                    else
-                    {
-                        if (async) await callMedia.StopContinuousDtmfRecognitionAsync(identifier);
-                        else callMedia.StopContinuousDtmfRecognition(identifier);
-                    }
-                }
+                    if (async) await callMedia.StopContinuousDtmfRecognitionAsync(opts); else callMedia.StopContinuousDtmfRecognition(opts);
 
-                var props = _service.GetCallConnectionProperties(callConnectionId);
-                return Ok(new CallConnectionResponse { CallConnectionId = callConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
+                var props = _service.GetCallConnectionProperties(request.CallConnectionId);
+                return Ok(new CallConnectionResponse { CallConnectionId = request.CallConnectionId, CorrelationId = props.CorrelationId, Status = props.CallConnectionState.ToString() });
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error {Action} continuous DTMF", action.ToLower());
-                return Problem($"Failed to {action.ToLower()} continuous DTMF: {ex.Message}");
-            }
+            catch (Exception ex) { _logger.LogError(ex, "Error in continuous DTMF"); return Problem($"Failed continuous DTMF operation: {ex.Message}"); }
         }
 
-        // ???????????????????????????????????????????????????????????????????????????
-        //  SHARED HELPERS
-        // ???????????????????????????????????????????????????????????????????????????
+        // ??? UTILITIES ??????????????????????????????????????????????????????????
 
         private enum RecognizeType { Dtmf, Choice, Speech, SpeechOrDtmf }
 

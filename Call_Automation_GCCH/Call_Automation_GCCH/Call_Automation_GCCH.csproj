@@ -4,20 +4,18 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
     <Content Include="Properties\launchSettings.json" />
   </ItemGroup>
 
-  <ItemGroup>
+	<ItemGroup>
 	<PackageReference Include="Azure.Communication.CallAutomation" Version="1.5.0-alpha.20250605.1" />
 	<PackageReference Include="Azure.Messaging.EventGrid" Version="4.16.0" />
-    <PackageReference Include="Azure.Storage.Blobs" Version="12.22.0" />
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
-  </ItemGroup>
+		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <None Include="wwwroot\audio\prompt.wav" />
-  </ItemGroup>
 </Project>

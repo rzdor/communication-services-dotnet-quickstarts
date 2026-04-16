@@ -32,186 +32,93 @@ namespace Call_Automation_GCCH.Controllers
             _config = configOptions.Value ?? throw new ArgumentNullException(nameof(configOptions));
         }
 
-        //
-        // CREATE CALL (ACS or PSTN)
-        //
+        /// <summary>
+        /// Creates an outbound call with optional transcription and media streaming.
+        /// Omit "transcriptionOptions" / "mediaStreamingOptions" for a basic call.
+        /// </summary>
+        [HttpPost("createCallAsync")]
+        [Tags("Outbound Call APIs")]
+        public Task<IActionResult> CreateCallAsync([FromBody] CreateCallWithOptionsRequest request)
+            => HandleCreateCallWithOptions(request, async: true);
 
         [HttpPost("createCall")]
         [Tags("Outbound Call APIs")]
-        public IActionResult CreateCall(
-            string target,
-            bool isPstn = false)
-            => HandleCreateCall(target, isPstn, async: false).Result;
+        public IActionResult CreateCall([FromBody] CreateCallWithOptionsRequest request)
+            => HandleCreateCallWithOptions(request, async: false).Result;
 
-        [HttpPost("createCallAsync")]
-        [Tags("Outbound Call APIs")]
-        public Task<IActionResult> CreateCallAsync(
-            string target,
-            bool isPstn = false)
-            => HandleCreateCall(target, isPstn, async: true);
-
-        //
-        // TRANSFER CALL
-        //
-
-        [HttpPost("transferCall")]
-        [Tags("Transfer Call APIs")]
-        public IActionResult TransferCall(
-            string callConnectionId,
-            string transferTarget,
-            string transferee,
-            bool isPstn = false)
-            => HandleTransferCall(callConnectionId, transferTarget, transferee, isPstn, async: false).Result;
-
-        [HttpPost("transferCallAsync")]
-        [Tags("Transfer Call APIs")]
-        public Task<IActionResult> TransferCallAsync(
-            string callConnectionId,
-            string transferTarget,
-            string transferee,
-            bool isPstn = false)
-            => HandleTransferCall(callConnectionId, transferTarget, transferee, isPstn, async: true);
-
-        //
-        // HANG UP
-        //
-
-        [HttpPost("hangup")]
-        [Tags("Disconnect call APIs")]
-        public IActionResult Hangup(
-            string callConnectionId,
-            bool isForEveryone)
-            => HandleHangup(callConnectionId, isForEveryone, async: false).Result;
-
-        [HttpPost("hangupAsync")]
-        [Tags("Disconnect call APIs")]
-        public Task<IActionResult> HangupAsync(
-            string callConnectionId,
-            bool isForEveryone)
-            => HandleHangup(callConnectionId, isForEveryone, async: true);
-
-        //
-        // GROUP CALL (PSTN or ACS if you like—you could extend to both)
-        //
+        /// <summary>
+        /// Creates a group call with optional transcription and media streaming.
+        /// Omit "transcriptionOptions" / "mediaStreamingOptions" for a basic call.
+        /// </summary>
         [HttpPost("createGroupCallAsync")]
         [Tags("Group Call APIs")]
-        public Task<IActionResult> CreateGroupCallAsync(
-            [FromQuery] string targets)
-            => HandleGroupCall(targets, async: true);
+        public Task<IActionResult> CreateGroupCallAsync([FromBody] CreateGroupCallWithOptionsRequest request)
+            => HandleGroupCallWithOptions(request, async: true);
 
         [HttpPost("createGroupCall")]
         [Tags("Group Call APIs")]
-        public Task<IActionResult> CreateGroupCall(
-            [FromQuery] string targets)
-            => HandleGroupCall(targets, async: false);
+        public IActionResult CreateGroupCall([FromBody] CreateGroupCallWithOptionsRequest request)
+            => HandleGroupCallWithOptions(request, async: false).Result;
 
-        // You could add a sync version if you really need it...
+        /// <summary>Transfers a call to another participant.</summary>
+        [HttpPost("transferCallAsync")]
+        [Tags("Transfer Call APIs")]
+        public Task<IActionResult> TransferCallAsync([FromBody] TransferCallRequest request)
+            => HandleTransferCall(request, async: true);
+
+        [HttpPost("transferCall")]
+        [Tags("Transfer Call APIs")]
+        public IActionResult TransferCall([FromBody] TransferCallRequest request)
+            => HandleTransferCall(request, async: false).Result;
+
+        /// <summary>Hangs up a call.</summary>
+        [HttpPost("hangupAsync")]
+        [Tags("Disconnect call APIs")]
+        public Task<IActionResult> HangupAsync(string callConnectionId, bool isForEveryone)
+            => HandleHangup(callConnectionId, isForEveryone, async: true);
+
+        [HttpPost("hangup")]
+        [Tags("Disconnect call APIs")]
+        public IActionResult Hangup(string callConnectionId, bool isForEveryone)
+            => HandleHangup(callConnectionId, isForEveryone, async: false).Result;
 
         //
         // ========  HELPERS  ========
         //
 
-        private async Task<IActionResult> HandleCreateCall(
-            string target,
-            bool isPstn,
-            bool async)
+        private async Task<IActionResult> HandleTransferCall(TransferCallRequest request, bool async)
         {
-            if (string.IsNullOrEmpty(target))
-                return BadRequest("Target is required");
-
-            var idType = isPstn ? "PSTN" : "ACS";
-            _logger.LogInformation($"Starting {(async ? "async " : "")}create {idType} call to {target}");
-
-            try
-            {
-                // Build identifier & invite
-                var callbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks");
-                CallInvite invite = isPstn
-                    ? new CallInvite(new PhoneNumberIdentifier(target),
-                                     new PhoneNumberIdentifier(_config.AcsPhoneNumber))
-                    : new CallInvite(new CommunicationUserIdentifier(target));
-
-                var options = new CreateCallOptions(invite, callbackUri);
-
-                // Call SDK
-                CreateCallResult result = async
-                    ? await _service.GetCallAutomationClient().CreateCallAsync(options)
-                    : _service.GetCallAutomationClient().CreateCall(options);
-
-                var props = result.CallConnectionProperties;
-                _logger.LogInformation(
-                    $"Created {idType} call: ConnId={props.CallConnectionId}, CorrId={props.CorrelationId}, Status={props.CallConnectionState}");
-
-                return Ok(new CallConnectionResponse
-                {
-                    CallConnectionId = props.CallConnectionId,
-                    CorrelationId = props.CorrelationId,
-                    Status = props.CallConnectionState.ToString()
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Error creating {idType} call");
-                return Problem($"Failed to create {idType} call: {ex.Message}");
-            }
-        }
-
-        private async Task<IActionResult> HandleTransferCall(
-            string callConnectionId,
-            string transferTarget,
-            string transferee,
-            bool isPstn,
-            bool async)
-        {
-            if (string.IsNullOrEmpty(callConnectionId))
+            if (string.IsNullOrEmpty(request.CallConnectionId))
                 return BadRequest("callConnectionId is required");
 
-            var idType = isPstn ? "PSTN" : "ACS";
-            _logger.LogInformation($"Starting {(async ? "async " : "")}transfer {idType} call: {transferTarget} → {transferee}");
+            var idType = request.IsPstn ? "PSTN" : "ACS";
+            _logger.LogInformation("Transfer {Type} call. Target={Target}, Transferee={Transferee}", idType, request.TransferTarget, request.Transferee);
 
             try
             {
-                var connection = _service.GetCallConnection(callConnectionId);
-                var correlationId = _service.GetCallConnectionProperties(callConnectionId).CorrelationId;
+                var connection = _service.GetCallConnection(request.CallConnectionId);
+                var correlationId = _service.GetCallConnectionProperties(request.CallConnectionId).CorrelationId;
 
-                TransferToParticipantOptions options;
-                if (isPstn)
-                {
-                    // PSTN → PSTN
-                    options = new TransferToParticipantOptions(new PhoneNumberIdentifier(transferTarget))
-                    {
-                        OperationContext = "TransferCallContext",
-                        Transferee = new PhoneNumberIdentifier(transferee)
-                    };
-                }
-                else
-                {
-                    // ACS → ACS
-                    options = new TransferToParticipantOptions(new CommunicationUserIdentifier(transferTarget))
-                    {
-                        OperationContext = "TransferCallContext",
-                        Transferee = new CommunicationUserIdentifier(transferee)
-                    };
-                }
+                TransferToParticipantOptions options = request.IsPstn
+                    ? new TransferToParticipantOptions(new PhoneNumberIdentifier(request.TransferTarget))
+                      { OperationContext = "TransferCallContext", Transferee = new PhoneNumberIdentifier(request.Transferee) }
+                    : new TransferToParticipantOptions(new CommunicationUserIdentifier(request.TransferTarget))
+                      { OperationContext = "TransferCallContext", Transferee = new CommunicationUserIdentifier(request.Transferee) };
 
-                // Call SDK
                 Response<TransferCallToParticipantResult> resp = async
                     ? await connection.TransferCallToParticipantAsync(options)
                     : connection.TransferCallToParticipant(options);
 
-                _logger.LogInformation(
-                    $"Transfer complete. CallConnId={callConnectionId}, CorrId={correlationId}, Status={resp.GetRawResponse().Status}");
-
                 return Ok(new CallConnectionResponse
                 {
-                    CallConnectionId = callConnectionId,
+                    CallConnectionId = request.CallConnectionId,
                     CorrelationId = correlationId,
                     Status = resp.GetRawResponse().Status.ToString()
                 });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error transferring {idType} call");
+                _logger.LogError(ex, "Error transferring {Type} call", idType);
                 return Problem($"Failed to transfer {idType} call: {ex.Message}");
             }
         }
@@ -224,7 +131,7 @@ namespace Call_Automation_GCCH.Controllers
             if (string.IsNullOrEmpty(callConnectionId))
                 return BadRequest("callConnectionId is required");
 
-            _logger.LogInformation($"Starting {(async ? "async " : "")}hangup for {callConnectionId}");
+            _logger.LogInformation("Hangup. CallId={CallId}, ForEveryone={ForEveryone}", callConnectionId, isForEveryone);
 
             try
             {
@@ -252,64 +159,40 @@ namespace Call_Automation_GCCH.Controllers
             }
         }
 
-        private async Task<IActionResult> HandleGroupCall(
-            string targets,
-            bool async)
+        // -- CreateCallWithOptions handler ---------------------------------------
+
+        private async Task<IActionResult> HandleCreateCallWithOptions(CreateCallWithOptionsRequest request, bool async)
         {
-            if (string.IsNullOrEmpty(targets))
-                return BadRequest("Targets parameter is required");
+            if (string.IsNullOrEmpty(request.Target))
+                return BadRequest("Target is required");
 
-            var targetList = targets.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                   .Select(t => t.Trim())
-                                   .Where(t => !string.IsNullOrWhiteSpace(t))
-                                   .ToList();
-
-            if (targetList.Count == 0)
-                return BadRequest("At least one target is required");
-
-            _logger.LogInformation($"Starting {(async ? "async " : "")}group call to {string.Join(", ", targetList)}");
+            var idType = request.IsPstn ? "PSTN" : "ACS";
+            _logger.LogInformation("CreateCallWithOptions. Target={Target}, Type={Type}, Transcription={HasTranscription}, MediaStreaming={HasMediaStreaming}",
+                request.Target, idType, request.TranscriptionOptions != null, request.MediaStreamingOptions != null);
 
             try
             {
-                // Build identifiers based on format
-                var idList = new List<CommunicationIdentifier>();
-
-                foreach (var target in targetList)
-                {
-                    if (target.StartsWith("8:"))
-                    {
-                        // ACS participant
-                        idList.Add(new CommunicationUserIdentifier(target));
-                    }
-                    else
-                    {
-                        // PSTN participant
-                        if (!target.StartsWith("+"))
-                            return BadRequest($"PSTN number '{target}' must include country code (e.g., +1 for US)");
-
-                        idList.Add(new PhoneNumberIdentifier(target));
-                    }
-                }
-
                 var callbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks");
-                var sourceCallerId = new PhoneNumberIdentifier(_config.AcsPhoneNumber);
+                CallInvite invite = request.IsPstn
+                    ? new CallInvite(new PhoneNumberIdentifier(request.Target), new PhoneNumberIdentifier(_config.AcsPhoneNumber))
+                    : new CallInvite(new CommunicationUserIdentifier(request.Target));
 
-                var createGroupOpts = new CreateGroupCallOptions(idList, callbackUri)
+                var options = new CreateCallOptions(invite, callbackUri)
                 {
-                    SourceCallerIdNumber = sourceCallerId,
-                    // ... any media/transcription options you need
+                    OperationContext = request.OperationContext
                 };
 
-                CreateCallResult result;
-                if (async)
-                    result = await _service.GetCallAutomationClient().CreateGroupCallAsync(createGroupOpts);
-                else
-                    result = _service.GetCallAutomationClient().CreateGroupCall(createGroupOpts);
+                if (request.TranscriptionOptions != null)
+                    options.TranscriptionOptions = ToSdkTranscriptionOptions(request.TranscriptionOptions);
+
+                if (request.MediaStreamingOptions != null)
+                    options.MediaStreamingOptions = ToSdkMediaStreamingOptions(request.MediaStreamingOptions);
+
+                CreateCallResult result = async
+                    ? await _service.GetCallAutomationClient().CreateCallAsync(options)
+                    : _service.GetCallAutomationClient().CreateCall(options);
 
                 var props = result.CallConnectionProperties;
-                _logger.LogInformation(
-                    $"Group call created. ConnId={props.CallConnectionId}, CorrId={props.CorrelationId}");
-
                 return Ok(new CallConnectionResponse
                 {
                     CallConnectionId = props.CallConnectionId,
@@ -319,9 +202,108 @@ namespace Call_Automation_GCCH.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error creating group call");
-                return Problem($"Failed to create group call: {ex.Message}");
+                _logger.LogError(ex, "Error in CreateCall");
+                return Problem($"Failed to create {idType} call: {ex.Message}");
             }
+        }
+
+        private async Task<IActionResult> HandleGroupCallWithOptions(CreateGroupCallWithOptionsRequest request, bool async)
+        {
+            if (request.Targets == null || request.Targets.Count == 0)
+                return BadRequest("At least one target is required");
+
+            _logger.LogInformation("CreateGroupCallWithOptions. Targets={Targets}, Transcription={HasTranscription}, MediaStreaming={HasMediaStreaming}",
+                string.Join(",", request.Targets), request.TranscriptionOptions != null, request.MediaStreamingOptions != null);
+
+            try
+            {
+                var idList = new List<CommunicationIdentifier>();
+                foreach (var t in request.Targets)
+                {
+                    var trimmed = t?.Trim();
+                    if (string.IsNullOrEmpty(trimmed)) continue;
+
+                    if (trimmed.StartsWith("8:"))
+                        idList.Add(new CommunicationUserIdentifier(trimmed));
+                    else if (trimmed.StartsWith("+"))
+                        idList.Add(new PhoneNumberIdentifier(trimmed));
+                    else
+                        return BadRequest($"Invalid target '{trimmed}'. Must be ACS user ID (8:...) or phone number (+...)");
+                }
+
+                if (idList.Count == 0)
+                    return BadRequest("No valid targets provided");
+
+                var callbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks");
+                var groupOpts = new CreateGroupCallOptions(idList, callbackUri)
+                {
+                    SourceCallerIdNumber = new PhoneNumberIdentifier(_config.AcsPhoneNumber),
+                    OperationContext = request.OperationContext
+                };
+
+                if (request.TranscriptionOptions != null)
+                    groupOpts.TranscriptionOptions = ToSdkTranscriptionOptions(request.TranscriptionOptions);
+
+                if (request.MediaStreamingOptions != null)
+                    groupOpts.MediaStreamingOptions = ToSdkMediaStreamingOptions(request.MediaStreamingOptions);
+
+                CreateCallResult result = async
+                    ? await _service.GetCallAutomationClient().CreateGroupCallAsync(groupOpts)
+                    : _service.GetCallAutomationClient().CreateGroupCall(groupOpts);
+
+                var props = result.CallConnectionProperties;
+                return Ok(new CallConnectionResponse
+                {
+                    CallConnectionId = props.CallConnectionId,
+                    CorrelationId = props.CorrelationId,
+                    Status = props.CallConnectionState.ToString()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in CreateGroupCallWithOptions");
+                return Problem($"Failed to create group call with options: {ex.Message}");
+            }
+        }
+
+        // -- Shared helpers ------------------------------------------------------
+
+        private TranscriptionOptions ToSdkTranscriptionOptions(TranscriptionOptionsRequest config)
+        {
+            var wsUri = BuildWebSocketUri();
+            return new TranscriptionOptions(
+                new Uri(wsUri),
+                config.Locale,
+                config.StartTranscription,
+                TranscriptionTransport.Websocket)
+            {
+                EnableIntermediateResults = config.EnableIntermediateResults
+            };
+        }
+
+        private MediaStreamingOptions ToSdkMediaStreamingOptions(MediaStreamingOptionsRequest config)
+        {
+            var wsUri = BuildWebSocketUri();
+            var audioChannel = config.MediaStreamingAudioChannel?.Equals("Unmixed", StringComparison.OrdinalIgnoreCase) == true
+                ? MediaStreamingAudioChannel.Unmixed : MediaStreamingAudioChannel.Mixed;
+            var format = config.AudioFormat?.Equals("Pcm24KMono", StringComparison.OrdinalIgnoreCase) == true
+                ? AudioFormat.Pcm24KMono : AudioFormat.Pcm16KMono;
+
+            return new MediaStreamingOptions(
+                new Uri(wsUri),
+                MediaStreamingContent.Audio,
+                audioChannel,
+                MediaStreamingTransport.Websocket,
+                config.StartMediaStreaming)
+            {
+                EnableBidirectional = config.EnableBidirectional,
+                AudioFormat = format
+            };
+        }
+
+        private string BuildWebSocketUri()
+        {
+            return _config.CallbackUriHost.Replace("https://", "wss://").Replace("http://", "ws://").TrimEnd('/') + "/ws";
         }
     }
 
