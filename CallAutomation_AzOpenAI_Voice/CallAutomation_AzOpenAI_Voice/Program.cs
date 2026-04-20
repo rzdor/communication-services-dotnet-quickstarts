@@ -16,21 +16,29 @@ using Newtonsoft.Json;
 if (args.Length >= 2 && args[0].Equals("decode", StringComparison.OrdinalIgnoreCase))
 {
     var encoded = args[1];
+    if (encoded.TryDecodeUrlString(out var guid))
+    {
+        Console.WriteLine(guid);
+    }
+    else
+    {
+        Console.Error.WriteLine($"Failed to decode '{encoded}' as a GUID: invalid URL-safe base64.");
+    }
+    return;
+}
+
+if (args.Length >= 2 && args[0].Equals("decode-server-call-id", StringComparison.OrdinalIgnoreCase))
+{
     try
     {
-        var bytes = Convert.FromBase64String(encoded
-                        .Replace('_', '/')
-                        .Replace('-', '+')
-                        .PadRight((encoded.Length + 3) & ~3, '='));
-        Console.WriteLine(BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant());
-        if (bytes.Length == 16)
-        {
-            Console.WriteLine(new Guid(bytes));
-        }
+        var url = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(args[1]));
+        Console.WriteLine($"URL:  {url}");
+        var guid = Helper.ExtractMediaSessionId(args[1]);
+        Console.WriteLine($"GUID: {guid}");
     }
-    catch (FormatException)
+    catch (Exception ex)
     {
-        Console.Error.WriteLine($"Failed to decode '{encoded}': invalid base64.");
+        Console.Error.WriteLine($"Failed to decode serverCallId: {ex.Message}");
     }
     return;
 }
@@ -143,7 +151,11 @@ app.MapGet("/api/calls/active", (CallSessionManager sessionManager) =>
         s.CallerId,
         Status = s.Status.ToString(),
         Duration = s.Duration.ToString(@"hh\:mm\:ss"),
-        s.StartTime
+        s.StartTime,
+        s.BotEndpointId,
+        s.MediaSessionId,
+        s.ResourceId,
+        MediaSdkStatus = s.RoomConnector?.MediaConnectionState
     });
     return Results.Ok(new { activeSessions, total = sessionManager.TotalCallCount });
 });
@@ -287,6 +299,8 @@ app.MapPost("/api/incomingCall", async (
 
             // Create per-call session (keyed by correlationId)
             var session = sessionManager.CreateSession(correlationId, connectionId, callerId);
+            session.ServerCallId = serverCallId;
+            session.MediaSessionId = mediaSessionId;
 
             // Connect via Media SDK
             var roomConnector = new TestCallRoomConnector(mc, logger, app.Services);
@@ -295,6 +309,8 @@ app.MapPost("/api/incomingCall", async (
             var connected = await roomConnector.ConnectAsync(mediaSessionId);
             if (connected)
             {
+                session.BotEndpointId = roomConnector.EndpointId;
+                session.ResourceId = roomConnector.ResourceId;
                 logger.LogInformation("MediaSDK connected for call {Id}", correlationId);
                 try
                 {

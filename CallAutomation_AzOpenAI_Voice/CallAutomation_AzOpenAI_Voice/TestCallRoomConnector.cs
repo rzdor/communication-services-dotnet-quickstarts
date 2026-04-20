@@ -18,6 +18,9 @@ public class TestCallRoomConnector
     private MediaConnection? _connection;
     private MediaSession? _session;
     public string? LastError { get; private set; }
+    public string? EndpointId => _connection?.EndpointId;
+    public string? ResourceId => _connection?.ResourceId;
+    public string? MediaConnectionState => _connection?.ConnectionState.ToString();
     public OutgoingAudioStream OutgoingAudioStream { get; private set; }
     public AzureOpenAIService aiServiceHandler { get; set; }
 
@@ -35,16 +38,19 @@ public class TestCallRoomConnector
             string serviceOrigin = _mediaClient.ServiceOrigin;
             _logger.LogInformation($"Service Origin URL: {serviceOrigin}");
 
-            _connection = await _mediaClient.CreateMediaConnectionAsync();
+            MediaConnectionOptions options = new MediaConnectionOptions();
+            _connection = await _mediaClient.CreateMediaConnectionAsync(options);
 
             _logger.LogInformation($"MediaConnection {_connection.ConnectionState} {_connection.EndpointId}");
 
             _connection.OnStateChanged += OnConnectionStateChanged;
             _connection.OnStatsReportReceived += OnStatsReportReceived;
 
-            _session = await _connection.JoinAsync(
+            _session = _connection.CreateMediaSession(
                 sessionId: sessionId,
-                mediaSessionJoinOptions: new MediaSessionJoinOptions() { IncomingDataPayloadTypes = [5] });
+                options: new MediaSessionOptions(new HashSet<uint> { 5 }));
+
+            await _session.JoinAsync();
 
             OutgoingAudioStream = _session.AddOutgoingAudioStream();
 

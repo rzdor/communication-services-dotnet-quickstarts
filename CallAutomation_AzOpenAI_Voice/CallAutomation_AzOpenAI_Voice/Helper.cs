@@ -35,7 +35,9 @@ public static class Helper
         if (convIndex < 0 || convIndex + 1 >= segments.Length)
             throw new ArgumentException($"Could not find '/conv/{{id}}' segment in decoded serverCallId URL: {url}");
 
-        var encodedGuid = segments[convIndex + 1];
+        var convSegment = segments[convIndex + 1];
+        // The conv segment may contain a suffix after '~' (e.g., "pnTddMNa9U-1MJiHBvTquA~074c..."); extract only the GUID part.
+        var encodedGuid = convSegment.Split('~')[0];
         if (!encodedGuid.TryDecodeUrlString(out var guid))
             throw new ArgumentException($"Could not decode '{encodedGuid}' as a GUID from serverCallId URL: {url}");
 

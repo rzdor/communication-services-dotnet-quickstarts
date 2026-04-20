@@ -43,6 +43,18 @@ else
             <div class="stat-label">Correlation ID</div>
             <div style="font-size: 12px; font-weight: 400; word-break: break-all;">@Model.Session.CorrelationId</div>
         </div>
+        <div class="stat-card">
+            <div class="stat-label">Bot Endpoint ID</div>
+            <div style="font-size: 12px; font-weight: 400; word-break: break-all;">@(Model.Session.BotEndpointId ?? "—")</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Resource ID</div>
+            <div style="font-size: 12px; font-weight: 400; word-break: break-all;">@(Model.Session.ResourceId ?? "—")</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Media Session GUID</div>
+            <div style="font-size: 12px; font-weight: 400; word-break: break-all;">@(Model.Session.MediaSessionId ?? "—")</div>
+        </div>
     </div>
 
     <div class="card">

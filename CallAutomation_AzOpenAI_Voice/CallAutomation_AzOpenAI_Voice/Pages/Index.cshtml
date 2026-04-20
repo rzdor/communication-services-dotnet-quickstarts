@@ -33,6 +33,10 @@
                     <tr>
                         <th>Caller ID</th>
                         <th>Status</th>
+                        <th>Media SDK</th>
+                        <th>Resource ID</th>
+                        <th>Bot Endpoint ID</th>
+                        <th>Media Session GUID</th>
                         <th>Duration</th>
                         <th>Started</th>
                         <th>Actions</th>
@@ -44,6 +48,10 @@
                         <tr>
                             <td>@call.CallerId</td>
                             <td><span class="badge badge-@call.Status.ToString().ToLower()">@call.Status</span></td>
+                            <td><span class="badge badge-@((call.RoomConnector?.MediaConnectionState ?? "—").ToLower())">@(call.RoomConnector?.MediaConnectionState ?? "—")</span></td>
+                            <td style="font-size: 11px; word-break: break-all;">@(call.ResourceId ?? "—")</td>
+                            <td style="font-size: 11px; word-break: break-all;">@(call.BotEndpointId ?? "—")</td>
+                            <td style="font-size: 11px; word-break: break-all;">@(call.MediaSessionId ?? "—")</td>
                             <td>@call.Duration.ToString(@"hh\:mm\:ss")</td>
                             <td>@call.StartTime.ToString("HH:mm:ss")</td>
                             <td>
@@ -72,12 +80,17 @@
             return;
         }
 
-        let html = '<table><thead><tr><th>Caller ID</th><th>Status</th><th>Duration</th><th>Started</th><th>Actions</th></tr></thead><tbody>';
+        let html = '<table><thead><tr><th>Caller ID</th><th>Status</th><th>Media SDK</th><th>Resource ID</th><th>Bot Endpoint ID</th><th>Media Session GUID</th><th>Duration</th><th>Started</th><th>Actions</th></tr></thead><tbody>';
         sessions.forEach(function(s) {
             const badgeClass = s.Status.toLowerCase();
+            const mediaSdkStatus = s.MediaSdkStatus || '—';
             html += '<tr>';
             html += '<td>' + s.CallerId + '</td>';
             html += '<td><span class="badge badge-' + badgeClass + '">' + s.Status + '</span></td>';
+            html += '<td><span class="badge badge-' + mediaSdkStatus.toLowerCase() + '">' + mediaSdkStatus + '</span></td>';
+            html += '<td style="font-size:11px;word-break:break-all">' + (s.ResourceId || '—') + '</td>';
+            html += '<td style="font-size:11px;word-break:break-all">' + (s.BotEndpointId || '—') + '</td>';
+            html += '<td style="font-size:11px;word-break:break-all">' + (s.MediaSessionId || '—') + '</td>';
             html += '<td>' + s.Duration + '</td>';
             html += '<td>' + new Date(s.StartTime).toLocaleTimeString() + '</td>';
             html += '<td>';

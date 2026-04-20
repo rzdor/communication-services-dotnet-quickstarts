@@ -22,6 +22,10 @@ namespace CallAutomation_AzOpenAI_Voice.Models
         public string CallConnectionId { get; set; } = string.Empty;
         public string CorrelationId { get; set; } = string.Empty;
         public string CallerId { get; set; } = string.Empty;
+        public string? ServerCallId { get; set; }
+        public string? MediaSessionId { get; set; }
+        public string? BotEndpointId { get; set; }
+        public string? ResourceId { get; set; }
         public DateTime StartTime { get; set; } = DateTime.UtcNow;
         public DateTime? EndTime { get; set; }
         public CallStatus Status { get; set; } = CallStatus.Connecting;
