@@ -188,6 +188,9 @@ namespace Call_Automation_GCCH.Controllers
                 if (request.MediaStreamingOptions != null)
                     options.MediaStreamingOptions = ToSdkMediaStreamingOptions(request.MediaStreamingOptions);
 
+                if (request.CallIntelligenceOptions != null)
+                    options.CallIntelligenceOptions = ToSdkCallIntelligenceOptions(request.CallIntelligenceOptions);
+
                 CreateCallResult result = async
                     ? await _service.GetCallAutomationClient().CreateCallAsync(options)
                     : _service.GetCallAutomationClient().CreateCall(options);
@@ -238,7 +241,8 @@ namespace Call_Automation_GCCH.Controllers
                 var groupOpts = new CreateGroupCallOptions(idList, callbackUri)
                 {
                     SourceCallerIdNumber = new PhoneNumberIdentifier(_config.AcsPhoneNumber),
-                    OperationContext = request.OperationContext
+                    OperationContext = request.OperationContext,
+                    SourceDisplayName = request.SourceDisplayName
                 };
 
                 if (request.TranscriptionOptions != null)
@@ -246,6 +250,9 @@ namespace Call_Automation_GCCH.Controllers
 
                 if (request.MediaStreamingOptions != null)
                     groupOpts.MediaStreamingOptions = ToSdkMediaStreamingOptions(request.MediaStreamingOptions);
+
+                if (request.CallIntelligenceOptions != null)
+                    groupOpts.CallIntelligenceOptions = ToSdkCallIntelligenceOptions(request.CallIntelligenceOptions);
 
                 CreateCallResult result = async
                     ? await _service.GetCallAutomationClient().CreateGroupCallAsync(groupOpts)
@@ -304,6 +311,14 @@ namespace Call_Automation_GCCH.Controllers
         private string BuildWebSocketUri()
         {
             return _config.CallbackUriHost.Replace("https://", "wss://").Replace("http://", "ws://").TrimEnd('/') + "/ws";
+        }
+
+        private CallIntelligenceOptions ToSdkCallIntelligenceOptions(CallIntelligenceOptionsRequest config)
+        {
+            return new CallIntelligenceOptions
+            {
+                CognitiveServicesEndpoint = new Uri(config.CognitiveServicesEndpoint)
+            };
         }
     }
 

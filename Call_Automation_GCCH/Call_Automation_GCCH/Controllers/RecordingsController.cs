@@ -112,17 +112,43 @@ namespace Call_Automation_GCCH.Controllers
                     return BadRequest("AudioVideo content is only supported with Mp4 format.");
 
                 var callProps = _service.GetCallConnectionProperties(request.CallConnectionId);
-                CallLocator callLocator = new ServerCallLocator(callProps.ServerCallId);
 
-                var recordingOptions = request.UseCallConnectionId
-                    ? new StartRecordingOptions(callProps.CallConnectionId)
-                    : new StartRecordingOptions(callLocator);
+                var locatorType = (request.CallLocatorType?.Trim() ?? "CallConnectionId").ToLowerInvariant();
+                StartRecordingOptions recordingOptions = locatorType switch
+                {
+                    "callconnectionid" => new StartRecordingOptions(callProps.CallConnectionId),
+                    "servercalllocator" => new StartRecordingOptions(
+                        new ServerCallLocator(!string.IsNullOrEmpty(request.ServerCallId)
+                            ? request.ServerCallId
+                            : callProps.ServerCallId)),
+                    "groupcalllocator" => string.IsNullOrEmpty(request.GroupCallId)
+                        ? throw new ArgumentException("groupCallId is required when callLocatorType is 'GroupCallLocator'.")
+                        : new StartRecordingOptions(new GroupCallLocator(request.GroupCallId)),
+                    _ => throw new ArgumentException(
+                        $"Invalid callLocatorType '{request.CallLocatorType}'. " +
+                        "Valid values: 'CallConnectionId', 'ServerCallLocator', 'GroupCallLocator'.")
+                };
 
                 recordingOptions.RecordingContent = recordingContent;
                 recordingOptions.RecordingFormat = format;
                 recordingOptions.RecordingChannel = recordingChannel;
                 recordingOptions.RecordingStateCallbackUri = new Uri(new Uri(_config.CallbackUriHost), "/api/callbacks");
                 recordingOptions.PauseOnStart = opts.PauseOnStart;
+
+                if (!string.IsNullOrEmpty(opts.ExternalStorageContainerUri))
+                    recordingOptions.RecordingStorage = RecordingStorage.CreateAzureBlobContainerRecordingStorage(new Uri(opts.ExternalStorageContainerUri));
+
+                if (opts.ChannelAffinity != null && opts.ChannelAffinity.Count > 0)
+                {
+                    foreach (var ca in opts.ChannelAffinity)
+                    {
+                        CommunicationIdentifier participant = ca.Participant.StartsWith("+")
+                            ? new PhoneNumberIdentifier(ca.Participant)
+                            : new CommunicationUserIdentifier(ca.Participant);
+                        recordingOptions.ChannelAffinity.Add(new ChannelAffinity(participant) { Channel = ca.Channel });
+                    }
+                }
+
                 _service.RecordingFileFormat = format.ToString();
 
                 var result = async

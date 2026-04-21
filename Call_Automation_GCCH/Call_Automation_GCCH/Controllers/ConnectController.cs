@@ -96,6 +96,14 @@ namespace Call_Automation_GCCH.Controllers
                     };
                 }
 
+                if (request.CallIntelligenceOptions != null)
+                {
+                    connectOpts.CallIntelligenceOptions = new CallIntelligenceOptions
+                    {
+                        CognitiveServicesEndpoint = new Uri(request.CallIntelligenceOptions.CognitiveServicesEndpoint)
+                    };
+                }
+
                 ConnectCallResult result = async
                     ? await _service.GetCallAutomationClient().ConnectCallAsync(connectOpts)
                     : _service.GetCallAutomationClient().ConnectCall(connectOpts);

@@ -69,6 +69,21 @@ namespace Call_Automation_GCCH.Models
     }
 
     /// <summary>
+    /// Call intelligence configuration for AI-powered features.
+    /// Maps to Azure SDK CallIntelligenceOptions.
+    /// </summary>
+    public class CallIntelligenceOptionsRequest
+    {
+        /// <summary>
+        /// The Cognitive Services endpoint URI for AI features (e.g. speech-to-text).
+        /// Maps to: CallIntelligenceOptions.CognitiveServicesEndpoint
+        /// </summary>
+        /// <example>https://my-cognitive-services.cognitiveservices.azure.us/</example>
+        [Required]
+        public string CognitiveServicesEndpoint { get; set; } = default!;
+    }
+
+    /// <summary>
     /// Request body for creating an outbound call with CreateCallOptions.
     /// 
     /// To enable transcription: include the "transcriptionOptions" object.
@@ -141,10 +156,16 @@ namespace Call_Automation_GCCH.Models
         /// </summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public MediaStreamingOptionsRequest? MediaStreamingOptions { get; set; }
+
+        /// <summary>
+        /// Call intelligence configuration for AI features. Omit to disable.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public CallIntelligenceOptionsRequest? CallIntelligenceOptions { get; set; }
     }
 
     /// <summary>
-    /// Request body for creating a group call with CreateGroupCallOptions.
+    /// Request body for creating a group call
     /// 
     /// To enable transcription: include the "transcriptionOptions" object.
     /// To enable media streaming: include the "mediaStreamingOptions" object.
@@ -182,6 +203,13 @@ namespace Call_Automation_GCCH.Models
         public string OperationContext { get; set; } = "groupCallContext";
 
         /// <summary>
+        /// Display name shown as the caller. Maps to: CreateGroupCallOptions.SourceDisplayName
+        /// </summary>
+        /// <example>Contoso Support</example>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? SourceDisplayName { get; set; }
+
+        /// <summary>
         /// Transcription configuration. Set to null or omit to disable transcription.
         /// </summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -192,6 +220,12 @@ namespace Call_Automation_GCCH.Models
         /// </summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public MediaStreamingOptionsRequest? MediaStreamingOptions { get; set; }
+
+        /// <summary>
+        /// Call intelligence configuration for AI features. Omit to disable.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public CallIntelligenceOptionsRequest? CallIntelligenceOptions { get; set; }
     }
 
     /// <summary>
@@ -233,6 +267,12 @@ namespace Call_Automation_GCCH.Models
         /// </summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public MediaStreamingOptionsRequest? MediaStreamingOptions { get; set; }
+
+        /// <summary>
+        /// Call intelligence configuration for AI features. Omit to disable.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public CallIntelligenceOptionsRequest? CallIntelligenceOptions { get; set; }
     }
 
     /// <summary>
@@ -265,17 +305,92 @@ namespace Call_Automation_GCCH.Models
         /// </summary>
         /// <example>false</example>
         public bool PauseOnStart { get; set; } = false;
+
+        /// <summary>
+        /// Azure Blob Storage container URI for external recording storage.
+        /// Omit to use default ACS recording storage.
+        /// </summary>
+        /// <example>https://myaccount.blob.core.usgovcloudapi.net/recordings</example>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ExternalStorageContainerUri { get; set; }
+
+        /// <summary>
+        /// Channel affinity list to map specific participants to specific audio channels.
+        /// Each entry maps a participant identifier to a channel number (0-based).
+        /// Only applicable when IsMixed is false (unmixed recording).
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<ChannelAffinityRequest>? ChannelAffinity { get; set; }
+    }
+
+    /// <summary>
+    /// Maps a participant to a specific audio channel for unmixed recording.
+    /// </summary>
+    public class ChannelAffinityRequest
+    {
+        /// <summary>
+        /// Participant identifier: ACS user ID (8:...) or phone number (+...).
+        /// </summary>
+        /// <example>+18001234567</example>
+        [Required]
+        public string Participant { get; set; } = default!;
+
+        /// <summary>
+        /// Zero-based audio channel number to assign to this participant.
+        /// </summary>
+        /// <example>0</example>
+        [Required]
+        public int Channel { get; set; }
     }
 
     /// <summary>
     /// Request body for starting a recording.
     /// 
-    /// Example — basic recording:
-    /// { "callConnectionId": "..." }
+    /// The SDK requires a "call locator" to identify which call to record.
+    /// Use "callLocatorType" to choose one of three supported locator strategies:
     /// 
-    /// Example — recording with custom options:
+    /// ?????????????????????????????????????????????????????????????????????????????????????
+    /// ? callLocatorType      ? Description                                                ?
+    /// ?????????????????????????????????????????????????????????????????????????????????????
+    /// ? "CallConnectionId"   ? Uses the callConnectionId you already have from             ?
+    /// ?   (default)          ? creating/answering the call. Simplest option.               ?
+    /// ?????????????????????????????????????????????????????????????????????????????????????
+    /// ? "ServerCallLocator"  ? Uses a server call ID. If you omit "serverCallId", it is    ?
+    /// ?                      ? auto-resolved from the callConnectionId. You can also       ?
+    /// ?                      ? supply it explicitly (e.g. from an IncomingCall event).      ?
+    /// ?????????????????????????????????????????????????????????????????????????????????????
+    /// ? "GroupCallLocator"   ? Uses a group call ID for group/rooms scenarios.              ?
+    /// ?                      ? You MUST provide "groupCallId".                              ?
+    /// ?????????????????????????????????????????????????????????????????????????????????????
+    /// 
+    /// Example 1 — simplest (uses call connection ID):
     /// {
-    ///   "callConnectionId": "...",
+    ///   "callConnectionId": "411f0200-abcd-1234-..."
+    /// }
+    /// 
+    /// Example 2 — server call locator (auto-resolved):
+    /// {
+    ///   "callConnectionId": "411f0200-abcd-1234-...",
+    ///   "callLocatorType": "ServerCallLocator"
+    /// }
+    /// 
+    /// Example 3 — server call locator (explicit ID from IncomingCall event):
+    /// {
+    ///   "callConnectionId": "411f0200-abcd-1234-...",
+    ///   "callLocatorType": "ServerCallLocator",
+    ///   "serverCallId": "aHR0cHM6Ly9hcGku..."
+    /// }
+    /// 
+    /// Example 4 — group call locator:
+    /// {
+    ///   "callConnectionId": "411f0200-abcd-1234-...",
+    ///   "callLocatorType": "GroupCallLocator",
+    ///   "groupCallId": "29228d3e-fbc0-4fef-..."
+    /// }
+    /// 
+    /// Example 5 — with recording options:
+    /// {
+    ///   "callConnectionId": "411f0200-abcd-1234-...",
     ///   "recordingOptions": {
     ///     "isAudioVideo": true,
     ///     "recordingFormat": "Mp4",
@@ -287,16 +402,47 @@ namespace Call_Automation_GCCH.Models
     public class StartRecordingRequest
     {
         /// <summary>
-        /// The call connection ID for the call to record.
+        /// The call connection ID of the active call. Always required — used to resolve
+        /// call properties and as the default locator when callLocatorType is "CallConnectionId".
+        /// You receive this value from CreateCall, AnswerCall, or ConnectCall responses.
         /// </summary>
+        /// <example>411f0200-abcd-1234-5678-000000000000</example>
         [Required]
         public string CallConnectionId { get; set; } = default!;
 
         /// <summary>
-        /// Whether to use call connection ID (true) or server call locator (false) for recording.
+        /// Determines how the SDK locates the call for recording.
+        /// 
+        /// • "CallConnectionId" (default) — uses callConnectionId directly.
+        ///   Simplest option; works for all standard outbound/inbound calls.
+        /// 
+        /// • "ServerCallLocator" — uses a server call ID. The server call ID is
+        ///   auto-resolved from callConnectionId unless you provide "serverCallId" explicitly.
+        ///   Useful when you have the server call ID from an IncomingCall event or callback.
+        /// 
+        /// • "GroupCallLocator" — uses a group call ID for group/rooms scenarios.
+        ///   You MUST supply "groupCallId" when using this option.
         /// </summary>
-        /// <example>true</example>
-        public bool UseCallConnectionId { get; set; } = true;
+        /// <example>CallConnectionId</example>
+        [DefaultValue("CallConnectionId")]
+        public string CallLocatorType { get; set; } = "CallConnectionId";
+
+        /// <summary>
+        /// The server call ID. Only used when callLocatorType is "ServerCallLocator".
+        /// If omitted, the server call ID is automatically resolved from callConnectionId.
+        /// You can find this value in the IncomingCall event payload or call connection properties.
+        /// </summary>
+        /// <example>aHR0cHM6Ly9hcGku...</example>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ServerCallId { get; set; }
+
+        /// <summary>
+        /// The group call ID. Required when callLocatorType is "GroupCallLocator".
+        /// This is the ID of the group call you want to record (e.g. from a Rooms or group call scenario).
+        /// </summary>
+        /// <example>29228d3e-fbc0-4fef-abcd-000000000000</example>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? GroupCallId { get; set; }
 
         /// <summary>
         /// Recording configuration. Omit for defaults (Audio, Mp3, Mixed, no pause).
