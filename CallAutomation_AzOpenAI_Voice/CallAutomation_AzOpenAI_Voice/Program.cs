@@ -155,7 +155,24 @@ app.MapGet("/api/calls/active", (CallSessionManager sessionManager) =>
         s.BotEndpointId,
         s.MediaSessionId,
         s.ResourceId,
-        MediaSdkStatus = s.RoomConnector?.MediaConnectionState
+        MediaSdkStatus = s.RoomConnector?.MediaConnectionState,
+        ServiceOrigin = s.RoomConnector?.ServiceOrigin,
+        MediaSdkSent = s.MediaHandler?.MediaPacketsSent ?? 0,
+        MediaSdkRecv = s.RoomConnector?.MediaPacketsReceived ?? 0,
+        OpenAISent = s.AiService?.OpenAIPacketsSent ?? 0,
+        OpenAIRecv = s.AiService?.OpenAIPacketsReceived ?? 0,
+        RemoteAudioStreams = s.RoomConnector?.RemoteAudioStreamCount ?? 0,
+        RemoteDataStreams = s.RoomConnector?.RemoteDataStreamCount ?? 0,
+        DataDropped = s.RoomConnector?.DataPacketsDropped ?? 0,
+        RemoteStreams = s.RoomConnector?.RemoteStreams.Select(rs => new
+        {
+            rs.StreamId,
+            rs.EndpointId,
+            rs.StreamType,
+            rs.LastState,
+            LastStateAt = rs.LastStateAt?.ToString("HH:mm:ss")
+        }) ?? Enumerable.Empty<object>(),
+        StreamStateLog = s.RoomConnector?.StreamStateLog ?? Array.Empty<string>()
     });
     return Results.Ok(new { activeSessions, total = sessionManager.TotalCallCount });
 });
@@ -195,6 +212,36 @@ app.MapGet("/api/calls/{correlationId}/transcript", (
 });
 
 // Test endpoint: send whats_the_weather.wav to Media SDK (outgoing audio stream)
+app.MapPost("/api/calls/{correlationId}/hangup", async (
+    string correlationId,
+    CallSessionManager sessionManager,
+    CallAutomationClient acsClient,
+    ILogger<Program> logger) =>
+{
+    var session = sessionManager.GetSession(correlationId);
+    if (session == null)
+        return Results.NotFound(new { error = "Call session not found" });
+
+    // Hang up via Call Automation if this is a real call (not manual test)
+    if (!string.IsNullOrEmpty(session.CallConnectionId))
+    {
+        try
+        {
+            await acsClient.GetCallConnection(session.CallConnectionId).HangUpAsync(true);
+            logger.LogInformation("Call Automation hang up sent for call {Id}", correlationId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Call Automation hang up failed for {Id}, proceeding with local cleanup", correlationId);
+        }
+    }
+
+    logger.LogInformation("Hang up requested for call {Id}", correlationId);
+    sessionManager.EndSession(correlationId);
+    return Results.Ok(new { message = "Call ended" });
+});
+
+// Test endpoint: send whats_the_weather.wav to Media SDK (outgoing audio stream)
 app.MapPost("/api/calls/{correlationId}/test/media", async (
     string correlationId,
     CallSessionManager sessionManager,
@@ -208,10 +255,20 @@ app.MapPost("/api/calls/{correlationId}/test/media", async (
     if (!File.Exists(wavPath))
         return Results.NotFound(new { error = "whats_the_weather.wav not found" });
 
-    using var audioStream = File.OpenRead(wavPath);
-    using var memoryStream = new MemoryStream();
-    await audioStream.CopyToAsync(memoryStream);
-    await session.MediaHandler.SendMessageAsync(memoryStream.ToArray());
+    // Strip WAV header — OutgoingAudioStream.Write() expects raw PCM samples
+    using var fileStream = File.OpenRead(wavPath);
+    using var reader = new BinaryReader(fileStream);
+    reader.ReadBytes(12); // RIFF header
+    while (fileStream.Position < fileStream.Length)
+    {
+        var chunkId = new string(reader.ReadChars(4));
+        var chunkSize = reader.ReadInt32();
+        if (chunkId == "data")
+            break;
+        reader.ReadBytes(chunkSize);
+    }
+    var pcmData = reader.ReadBytes((int)(fileStream.Length - fileStream.Position));
+    await session.MediaHandler.SendMessageAsync(pcmData);
 
     logger.LogInformation("Sent test audio to Media SDK for call {Id}", correlationId);
     session.AddTranscript("System", "Sent test audio (whats_the_weather.wav) to Media SDK");
@@ -232,12 +289,91 @@ app.MapPost("/api/calls/{correlationId}/test/openai", async (
     if (!File.Exists(wavPath))
         return Results.NotFound(new { error = "whats_the_weather.wav not found" });
 
-    using var audioStream = File.OpenRead(wavPath);
-    await session.AiService.SendAudioToExternalAI(audioStream);
+    // Strip WAV header — OpenAI Realtime expects raw PCM16 samples, not a WAV file
+    using var fileStream = File.OpenRead(wavPath);
+    using var reader = new BinaryReader(fileStream);
+    // Read RIFF header to find "data" chunk and skip to raw PCM
+    reader.ReadBytes(12); // RIFF header (12 bytes)
+    while (fileStream.Position < fileStream.Length)
+    {
+        var chunkId = new string(reader.ReadChars(4));
+        var chunkSize = reader.ReadInt32();
+        if (chunkId == "data")
+            break;
+        reader.ReadBytes(chunkSize); // skip non-data chunks (fmt, etc.)
+    }
+    // Remaining stream is raw PCM data
+    await session.AiService.SendAudioToExternalAI(fileStream);
+
+    // Send 3 seconds of silence (PCM16 @ 24kHz) so the VAD can detect end of speech.
+    // Without this, the VAD waits forever for more audio to confirm silence.
+    var silenceBytes = new byte[24000 * 2 * 3]; // 3s of 24kHz 16-bit mono silence
+    await session.AiService.SendAudioToExternalAI(new MemoryStream(silenceBytes));
 
     logger.LogInformation("Sent test audio to OpenAI for call {Id}", correlationId);
     session.AddTranscript("System", "Sent test audio (whats_the_weather.wav) to OpenAI");
     return Results.Ok(new { message = "Audio sent to OpenAI" });
+});
+
+// Manual test call: connect Media SDK + OpenAI using a conversationId (media session GUID)
+app.MapPost("/api/calls/manual", async (
+    [FromBody] ManualCallRequest request,
+    ILogger<Program> logger,
+    CallSessionManager sessionManager,
+    MediaClient mc) =>
+{
+    if (string.IsNullOrWhiteSpace(request.ConversationId))
+        return Results.BadRequest(new { error = "conversationId is required" });
+
+    var mediaSessionId = request.ConversationId.Trim();
+    var correlationId = $"manual-{Guid.NewGuid()}";
+
+    logger.LogInformation("Manual call requested with conversationId: {ConversationId}", mediaSessionId);
+
+    var session = sessionManager.CreateSession(correlationId, "", "manual-test");
+    session.MediaSessionId = mediaSessionId;
+
+    var roomConnector = new TestCallRoomConnector(mc, logger, app.Services);
+    session.RoomConnector = roomConnector;
+
+    // Set up OpenAI and media handler BEFORE connecting, so aiServiceHandler
+    // is available when incoming audio streams arrive immediately after join.
+    try
+    {
+        var mediaHandler = new AcsMediaStreamingHandler(roomConnector, logger);
+        session.MediaHandler = mediaHandler;
+
+        var openAIService = new AzureOpenAIService(mediaHandler, app.Configuration);
+        openAIService.OnTranscript = (speaker, text) => session.AddTranscript(speaker, text);
+        session.AiService = openAIService;
+
+        mediaHandler.aiServiceHandler = openAIService;
+        roomConnector.aiServiceHandler = openAIService;
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to initialize AI service for manual call {Id}", correlationId);
+        sessionManager.FailSession(correlationId, ex.Message);
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+
+    var connected = await roomConnector.ConnectAsync(mediaSessionId);
+    if (!connected)
+    {
+        logger.LogError("MediaSDK connection failed for manual call: {Error}", roomConnector.LastError);
+        sessionManager.FailSession(correlationId, roomConnector.LastError ?? "MediaSDK connection failed");
+        return Results.Json(new { error = roomConnector.LastError ?? "MediaSDK connection failed" }, statusCode: 500);
+    }
+
+    session.BotEndpointId = roomConnector.EndpointId;
+    session.ResourceId = roomConnector.ResourceId;
+    logger.LogInformation("MediaSDK connected for manual call {Id}", correlationId);
+
+    session.AiService.StartConversation();
+    session.Status = CallStatus.Active;
+    logger.LogInformation("AI service started for manual call {Id}", correlationId);
+
+    return Results.Ok(new { correlationId, message = "Manual call started", mediaSessionId });
 });
 
 app.MapPost("/api/incomingCall", async (
@@ -306,33 +442,37 @@ app.MapPost("/api/incomingCall", async (
             var roomConnector = new TestCallRoomConnector(mc, logger, app.Services);
             session.RoomConnector = roomConnector;
 
+            // Set up OpenAI and media handler BEFORE connecting, so aiServiceHandler
+            // is available when incoming audio streams arrive immediately after join.
+            try
+            {
+                var mediaHandler = new AcsMediaStreamingHandler(roomConnector, logger);
+                session.MediaHandler = mediaHandler;
+
+                var openAIService = new AzureOpenAIService(mediaHandler, builder.Configuration);
+                openAIService.OnTranscript = (speaker, text) => session.AddTranscript(speaker, text);
+                session.AiService = openAIService;
+
+                mediaHandler.aiServiceHandler = openAIService;
+                roomConnector.aiServiceHandler = openAIService;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to initialize AI service for call {Id}", correlationId);
+                sessionManager.FailSession(correlationId, ex.Message);
+                continue;
+            }
+
             var connected = await roomConnector.ConnectAsync(mediaSessionId);
             if (connected)
             {
                 session.BotEndpointId = roomConnector.EndpointId;
                 session.ResourceId = roomConnector.ResourceId;
                 logger.LogInformation("MediaSDK connected for call {Id}", correlationId);
-                try
-                {
-                    var mediaHandler = new AcsMediaStreamingHandler(roomConnector);
-                    session.MediaHandler = mediaHandler;
 
-                    var openAIService = new AzureOpenAIService(mediaHandler, builder.Configuration);
-                    openAIService.OnTranscript = (speaker, text) => session.AddTranscript(speaker, text);
-                    session.AiService = openAIService;
-
-                    mediaHandler.aiServiceHandler = openAIService;
-                    roomConnector.aiServiceHandler = openAIService;
-                    openAIService.StartConversation();
-
-                    session.Status = CallStatus.Active;
-                    logger.LogInformation("AI service started for call {Id}", correlationId);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Failed to start AI service for call {Id}", correlationId);
-                    sessionManager.FailSession(correlationId, ex.Message);
-                }
+                session.AiService.StartConversation();
+                session.Status = CallStatus.Active;
+                logger.LogInformation("AI service started for call {Id}", correlationId);
             }
             else
             {

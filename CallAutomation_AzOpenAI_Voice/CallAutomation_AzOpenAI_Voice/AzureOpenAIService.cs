@@ -13,17 +13,14 @@ namespace CallAutomationOpenAI
         private RealtimeConversationSession m_aiSession;
         private AcsMediaStreamingHandler m_mediaStreaming;
         private bool _disposed;
-        private string m_answerPromptSystemTemplate = @"Your name is Sidney. You are a helpful AI voice assistant.
-
-IMPORTANT RULES:
-- Only respond when the user addresses you by name (""Sidney"", ""Hey Sidney"", ""Hi Sidney"", etc.)
-- If the user's speech does not mention your name ""Sidney"", do NOT respond at all — remain completely silent.
-- Ignore background noise, side conversations, and any speech not directed at you.
-- When addressed by name, be helpful, concise, and conversational.
-- If someone says just ""Sidney"" without a question, respond with a brief acknowledgment like ""Yes, I'm here. How can I help?""";
+        private string m_answerPromptSystemTemplate = @"Your name is Sidney. You are a helpful AI voice assistant.";
 
         // Callback for transcript events (speaker, text)
         public Action<string, string>? OnTranscript { get; set; }
+        public long OpenAIPacketsSent => _openAIPacketsSent;
+        public long OpenAIPacketsReceived => _openAIPacketsReceived;
+        private long _openAIPacketsSent;
+        private long _openAIPacketsReceived;
 
         public AzureOpenAIService(AcsMediaStreamingHandler mediaStreaming, IConfiguration configuration)
         {            
@@ -116,6 +113,7 @@ IMPORTANT RULES:
                     {
                         if( deltaUpdate.AudioBytes != null)
                         {
+                            Interlocked.Increment(ref _openAIPacketsReceived);
                             await m_mediaStreaming.SendMessageAsync(deltaUpdate.AudioBytes.ToArray());
                         }
                     }
@@ -164,6 +162,7 @@ IMPORTANT RULES:
 
         public async Task SendAudioToExternalAI(Stream memoryStream)
         {
+            Interlocked.Increment(ref _openAIPacketsSent);
             await m_aiSession.SendInputAudioAsync(memoryStream);
         }
 

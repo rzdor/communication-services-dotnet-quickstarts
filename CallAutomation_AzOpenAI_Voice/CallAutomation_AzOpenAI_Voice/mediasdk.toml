@@ -15,7 +15,7 @@
 [general]
 debug_mode = true
 feed_topic_name = "conversation"
-app_entity_id = "AAAAAAAAAAAAAAAAAAACyQ=="
+#app_entity_id = "AAAAAAAAAAAAAAAAAAACyQ=="
 
 # Enable Europe compliance mode
 # europe_compliant = false
@@ -39,7 +39,8 @@ app_entity_id = "AAAAAAAAAAAAAAAAAAACyQ=="
 # This setting takes priority over the WB_URL environment variable.
 
 # Option 1: Single URL for all environments (simple inline) - currently active
-wb_frontdoor_url = "https://s2-eastus.gameday.waimeabae.com"
+#wb_frontdoor_url = "https://s2-eastus.gameday.waimeabae.com"
+wb_frontdoor_url = "https://insravan.personalsandbox.dev.waimeabae.com"
 
 # Option 2: Per-environment URLs (commented out - uncomment to use)
 [network.default]

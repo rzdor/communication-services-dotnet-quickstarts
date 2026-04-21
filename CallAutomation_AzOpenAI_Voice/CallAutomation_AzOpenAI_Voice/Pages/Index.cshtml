@@ -34,6 +34,10 @@
                         <th>Caller ID</th>
                         <th>Status</th>
                         <th>Media SDK</th>
+                        <th>Remote Streams</th>
+                        <th>Media Pkts (S/R)</th>
+                        <th>OpenAI Pkts (S/R)</th>
+                        <th>Dropped</th>
                         <th>Resource ID</th>
                         <th>Bot Endpoint ID</th>
                         <th>Media Session GUID</th>
@@ -45,10 +49,19 @@
                 <tbody id="calls-body">
                     @foreach (var call in Model.ActiveCalls)
                     {
+                        var audioCount = call.RoomConnector?.RemoteAudioStreamCount ?? 0;
+                        var dataCount = call.RoomConnector?.RemoteDataStreamCount ?? 0;
+                        var streams = call.RoomConnector?.RemoteStreams ?? Array.Empty<RemoteStreamInfo>();
                         <tr>
                             <td>@call.CallerId</td>
                             <td><span class="badge badge-@call.Status.ToString().ToLower()">@call.Status</span></td>
                             <td><span class="badge badge-@((call.RoomConnector?.MediaConnectionState ?? "—").ToLower())">@(call.RoomConnector?.MediaConnectionState ?? "—")</span></td>
+                            <td title="@string.Join(", ", streams.Select(s => s.StreamType + ":" + s.StreamId + " " + s.EndpointId))">
+                                🔊 @(audioCount) 📡 @(dataCount)
+                            </td>
+                            <td>@(call.MediaHandler?.MediaPacketsSent ?? 0) / @(call.RoomConnector?.MediaPacketsReceived ?? 0)</td>
+                            <td>@(call.AiService?.OpenAIPacketsSent ?? 0) / @(call.AiService?.OpenAIPacketsReceived ?? 0)</td>
+                            <td>@(call.RoomConnector?.DataPacketsDropped ?? 0)</td>
                             <td style="font-size: 11px; word-break: break-all;">@(call.ResourceId ?? "—")</td>
                             <td style="font-size: 11px; word-break: break-all;">@(call.BotEndpointId ?? "—")</td>
                             <td style="font-size: 11px; word-break: break-all;">@(call.MediaSessionId ?? "—")</td>
@@ -80,14 +93,19 @@
             return;
         }
 
-        let html = '<table><thead><tr><th>Caller ID</th><th>Status</th><th>Media SDK</th><th>Resource ID</th><th>Bot Endpoint ID</th><th>Media Session GUID</th><th>Duration</th><th>Started</th><th>Actions</th></tr></thead><tbody>';
+        let html = '<table><thead><tr><th>Caller ID</th><th>Status</th><th>Media SDK</th><th>Remote Streams</th><th>Media Pkts (S/R)</th><th>OpenAI Pkts (S/R)</th><th>Dropped</th><th>Resource ID</th><th>Bot Endpoint ID</th><th>Media Session GUID</th><th>Duration</th><th>Started</th><th>Actions</th></tr></thead><tbody>';
         sessions.forEach(function(s) {
             const badgeClass = s.Status.toLowerCase();
             const mediaSdkStatus = s.MediaSdkStatus || '—';
+            const streamDetails = (s.RemoteStreams || []).map(function(rs) { return rs.StreamType + ':' + rs.StreamId + ' ' + rs.EndpointId; }).join(', ');
             html += '<tr>';
             html += '<td>' + s.CallerId + '</td>';
             html += '<td><span class="badge badge-' + badgeClass + '">' + s.Status + '</span></td>';
             html += '<td><span class="badge badge-' + mediaSdkStatus.toLowerCase() + '">' + mediaSdkStatus + '</span></td>';
+            html += '<td title="' + streamDetails + '">🔊' + (s.RemoteAudioStreams || 0) + ' 📡' + (s.RemoteDataStreams || 0) + '</td>';
+            html += '<td>' + (s.MediaSdkSent || 0) + ' / ' + (s.MediaSdkRecv || 0) + '</td>';
+            html += '<td>' + (s.OpenAISent || 0) + ' / ' + (s.OpenAIRecv || 0) + '</td>';
+            html += '<td>' + (s.DataDropped || 0) + '</td>';
             html += '<td style="font-size:11px;word-break:break-all">' + (s.ResourceId || '—') + '</td>';
             html += '<td style="font-size:11px;word-break:break-all">' + (s.BotEndpointId || '—') + '</td>';
             html += '<td style="font-size:11px;word-break:break-all">' + (s.MediaSessionId || '—') + '</td>';

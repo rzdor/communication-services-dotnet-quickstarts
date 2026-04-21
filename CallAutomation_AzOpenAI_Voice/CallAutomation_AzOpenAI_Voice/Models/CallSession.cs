@@ -2,6 +2,11 @@ using CallAutomationOpenAI;
 
 namespace CallAutomation_AzOpenAI_Voice.Models
 {
+    public class ManualCallRequest
+    {
+        public string ConversationId { get; set; } = string.Empty;
+    }
+
     public enum CallStatus
     {
         Connecting,

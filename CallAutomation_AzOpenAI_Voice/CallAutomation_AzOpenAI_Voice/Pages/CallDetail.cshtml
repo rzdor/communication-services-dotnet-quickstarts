@@ -52,9 +52,90 @@ else
             <div style="font-size: 12px; font-weight: 400; word-break: break-all;">@(Model.Session.ResourceId ?? "—")</div>
         </div>
         <div class="stat-card">
+            <div class="stat-label">Media SDK Service URL</div>
+            <div style="font-size: 12px; font-weight: 400; word-break: break-all;">@(Model.Session.RoomConnector?.ServiceOrigin ?? "—")</div>
+        </div>
+        <div class="stat-card">
             <div class="stat-label">Media Session GUID</div>
             <div style="font-size: 12px; font-weight: 400; word-break: break-all;">@(Model.Session.MediaSessionId ?? "—")</div>
         </div>
+        <div class="stat-card">
+            <div class="stat-label">Media SDK Pkts (Sent / Recv)</div>
+            <div style="font-size: 16px; font-weight: 600;">@(Model.Session.MediaHandler?.MediaPacketsSent ?? 0) / @(Model.Session.RoomConnector?.MediaPacketsReceived ?? 0)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">OpenAI Pkts (Sent / Recv)</div>
+            <div style="font-size: 16px; font-weight: 600;">@(Model.Session.AiService?.OpenAIPacketsSent ?? 0) / @(Model.Session.AiService?.OpenAIPacketsReceived ?? 0)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Data Packets Dropped</div>
+            <div style="font-size: 16px; font-weight: 600;">@(Model.Session.RoomConnector?.DataPacketsDropped ?? 0)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Remote Audio Streams</div>
+            <div style="font-size: 16px; font-weight: 600;">@(Model.Session.RoomConnector?.RemoteAudioStreamCount ?? 0)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Remote Data Streams</div>
+            <div style="font-size: 16px; font-weight: 600;">@(Model.Session.RoomConnector?.RemoteDataStreamCount ?? 0)</div>
+        </div>
+    </div>
+
+    var remoteStreams = Model.Session.RoomConnector?.RemoteStreams ?? Array.Empty<RemoteStreamInfo>();
+    if (remoteStreams.Any())
+    {
+        <div class="card" style="margin-bottom: 16px;">
+            <h2>Remote Streams</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Stream ID</th>
+                        <th>Endpoint ID</th>
+                        <th>Last State</th>
+                        <th>State At</th>
+                        <th>Connected Since</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var stream in remoteStreams)
+                    {
+                        <tr>
+                            <td><span class="badge badge-active">@stream.StreamType</span></td>
+                            <td>@stream.StreamId</td>
+                            <td style="font-size: 11px; word-break: break-all;">@stream.EndpointId</td>
+                            <td style="font-size: 11px; font-family: monospace;">@(stream.LastState ?? "—")</td>
+                            <td>@(stream.LastStateAt?.ToString("HH:mm:ss") ?? "—")</td>
+                            <td>@stream.AddedAt.ToString("HH:mm:ss")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    var stateLog = Model.Session.RoomConnector?.StreamStateLog ?? Array.Empty<string>();
+    if (stateLog.Any())
+    {
+        <div class="card" style="margin-bottom: 16px;">
+            <h2>Stream State Events</h2>
+            <div style="max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px; padding: 8px; background: var(--bg-primary); border-radius: 4px;">
+                @foreach (var entry in stateLog)
+                {
+                    <div>@entry</div>
+                }
+            </div>
+        </div>
+    }
+
+    <div class="card" style="margin-bottom: 16px;">
+        <h2>Test Audio</h2>
+        <div style="display: flex; gap: 12px;">
+            <button class="btn test-audio-btn" style="background:#0078d4;color:#fff;padding:10px 20px;" onclick="sendTestAudio('media')">🔊 Play to Media SDK</button>
+            <button class="btn test-audio-btn" style="background:#107c10;color:#fff;padding:10px 20px;" onclick="sendTestAudio('openai')">🤖 Play to OpenAI</button>
+            <button class="btn" id="hangup-btn" style="background:#d13438;color:#fff;padding:10px 20px;" onclick="hangUp()">📞 Hang Up</button>
+        </div>
+        <div id="test-result" style="margin-top: 8px;"></div>
     </div>
 
     <div class="card">
@@ -79,38 +160,57 @@ else
 }
 
 @section Scripts {
-@if (Model.Session != null && !Model.IsCompleted)
+@if (Model.Session != null)
 {
 <script>
-    (function() {
-        const callId = '@Model.Session.CorrelationId';
-        const container = document.getElementById('transcript');
-        let transcriptIndex = @Model.Transcript.Count;
+    const callId = '@Model.Session.CorrelationId';
 
-        startPolling('/api/calls/' + callId + '/transcript?since=' + transcriptIndex, function(data) {
-            if (data.ended && !data.entries.length) {
-                const div = document.createElement('div');
-                div.className = 'transcript-entry';
-                div.innerHTML = '<span class="transcript-speaker" style="color: var(--text-secondary);">System</span><div class="transcript-text"><em>Call ended</em></div>';
-                container.appendChild(div);
-                return;
+    var _testBusy = false;
+    async function sendTestAudio(target) {
+        if (_testBusy) return;
+        _testBusy = true;
+        var btns = document.querySelectorAll('.test-audio-btn');
+        btns.forEach(function(b) { b.disabled = true; });
+        const result = document.getElementById('test-result');
+        result.innerHTML = '<span style="color: var(--text-secondary);">⏳ Sending...</span>';
+        try {
+            const resp = await fetch('/api/calls/' + callId + '/test/' + target, { method: 'POST' });
+            const data = await resp.json();
+            if (resp.ok) {
+                result.innerHTML = '<span style="color: #107c10;">✅ ' + data.message + '</span>';
+            } else {
+                result.innerHTML = '<span style="color: #d13438;">❌ ' + (data.error || 'Failed') + '</span>';
             }
+        } catch (e) {
+            result.innerHTML = '<span style="color: #d13438;">❌ ' + e.message + '</span>';
+        } finally {
+            // Keep buttons disabled for 5s to allow VAD cycle to complete
+            setTimeout(function() { _testBusy = false; btns.forEach(function(b) { b.disabled = false; }); }, 5000);
+        }
+    }
 
-            const empty = document.getElementById('empty-transcript');
-            if (empty && data.entries.length) empty.remove();
-
-            data.entries.forEach(function(entry) {
-                const div = document.createElement('div');
-                div.className = 'transcript-entry';
-                div.innerHTML = '<span class="transcript-speaker ' + entry.Speaker.toLowerCase() + '">' + entry.Speaker + '</span>'
-                    + '<span class="transcript-time">' + entry.Timestamp + '</span>'
-                    + '<div class="transcript-text">' + entry.Text + '</div>';
-                container.appendChild(div);
-            });
-            if (data.entries.length) container.scrollTop = container.scrollHeight;
-            transcriptIndex = data.total;
-        }, 2000);
-    })();
+    async function hangUp() {
+        var btn = document.getElementById('hangup-btn');
+        btn.disabled = true;
+        btn.textContent = '⏳ Ending...';
+        const result = document.getElementById('test-result');
+        try {
+            const resp = await fetch('/api/calls/' + callId + '/hangup', { method: 'POST' });
+            const data = await resp.json();
+            if (resp.ok) {
+                result.innerHTML = '<span style="color: #107c10;">✅ ' + data.message + '</span>';
+                document.querySelectorAll('.test-audio-btn').forEach(function(b) { b.disabled = true; });
+            } else {
+                result.innerHTML = '<span style="color: #d13438;">❌ ' + (data.error || 'Failed') + '</span>';
+                btn.disabled = false;
+                btn.textContent = '📞 Hang Up';
+            }
+        } catch (e) {
+            result.innerHTML = '<span style="color: #d13438;">❌ ' + e.message + '</span>';
+            btn.disabled = false;
+            btn.textContent = '📞 Hang Up';
+        }
+    }
 </script>
 }
 }
