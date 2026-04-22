@@ -14,6 +14,10 @@
             <input type="text" id="conversationId" placeholder="e.g. 4418eb47-22b6-4179-af94-009b36dba24d"
                    style="width: 100%; padding: 10px; font-size: 14px; border: 1px solid var(--border); border-radius: 6px; font-family: monospace;" />
         </div>
+        <div style="display: flex; align-items: center; gap: 8px; padding-bottom: 4px;">
+            <input type="checkbox" id="disableOpenAI" />
+            <label for="disableOpenAI" style="font-weight: 600; white-space: nowrap;">Disable OpenAI</label>
+        </div>
         <div>
             <button id="connectBtn" class="btn btn-primary" style="padding: 10px 24px;" onclick="startManualCall()">
                 🚀 Connect
@@ -50,13 +54,15 @@
         btn.disabled = true;
         btn.textContent = '⏳ Connecting...';
         result.style.display = 'block';
-        result.innerHTML = '<div style="color: var(--text-secondary); padding: 8px;">Connecting to Media SDK and starting OpenAI...</div>';
+        result.innerHTML = '<div style="color: var(--text-secondary); padding: 8px;">Connecting to Media SDK...</div>';
+
+        const disableOpenAI = document.getElementById('disableOpenAI').checked;
 
         try {
             const resp = await fetch('/api/calls/manual', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ conversationId: conversationId })
+                body: JSON.stringify({ conversationId: conversationId, disableOpenAI: disableOpenAI })
             });
             const data = await resp.json();
 

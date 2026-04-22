@@ -5,6 +5,7 @@ namespace CallAutomation_AzOpenAI_Voice.Models
     public class ManualCallRequest
     {
         public string ConversationId { get; set; } = string.Empty;
+        public bool DisableOpenAI { get; set; }
     }
 
     public enum CallStatus
@@ -67,6 +68,9 @@ namespace CallAutomation_AzOpenAI_Voice.Models
 
         public void Dispose()
         {
+            // Stop the media handler first to prevent new writes
+            try { MediaHandler?.Stop(); } catch { }
+            // Close AI service (cancels the streaming loop) before disconnecting MediaSDK
             try { AiService?.Close(); } catch { }
             try { RoomConnector?.Disconnect(); } catch { }
             AiService = null;

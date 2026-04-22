@@ -83,10 +83,10 @@ namespace CallAutomationOpenAI
                     {
                         Console.WriteLine(
                             $"  -- Voice activity detection started at {speechStartedUpdate.AudioStartTime} ms");
-                        // Barge-in, send stop audio
-                        var jsonString = OutStreamingData.GetStopAudioForOutbound();
-                        byte[] jsonBytes = Encoding.UTF8.GetBytes(jsonString);
-                        await m_mediaStreaming.SendMessageAsync(jsonBytes);
+                        // Barge-in: clear any queued outgoing audio.
+                        // Note: OutStreamingData.GetStopAudioForOutbound() is for WebSocket-based
+                        // Call Automation streaming, not MediaSDK OutgoingAudioStream.
+                        // Writing JSON into a PCM audio stream corrupts the transport.
                     }
 
                     if (update is ConversationInputSpeechFinishedUpdate speechFinishedUpdate)

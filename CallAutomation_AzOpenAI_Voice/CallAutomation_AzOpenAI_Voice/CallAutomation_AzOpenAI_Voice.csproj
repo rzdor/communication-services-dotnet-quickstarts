@@ -39,8 +39,8 @@
     <PackageReference Include="Azure.Communication.Common" Version="1.3.0" />
     <PackageReference Include="Azure.Communication.Identity" Version="1.0.0-beta.4" />
     <PackageReference Include="Microsoft.Azure.Communication.Sydney" Version="1.0.8" />
-    <PackageReference Include="Microsoft.Azure.Communication.Media" Version="1.0.0-beta.2026042177354846" />
-    <PackageReference Include="Microsoft.Azure.Communication.Media.Extensions" Version="1.0.0-beta.2026042177354846" />
+    <PackageReference Include="Microsoft.Azure.Communication.Media" Version="1.0.0-beta.2025120974434908" />
+    <PackageReference Include="Microsoft.Azure.Communication.Media.Extensions" Version="1.0.0-beta.2025120974434908" />
     <PackageReference Include="Azure.Messaging.EventGrid" Version="4.13.0" />
     <PackageReference Include="CliWrap" Version="3.6.1" />
     <PackageReference Include="Microsoft.CognitiveServices.Speech" Version="1.40.0" />

@@ -343,12 +343,19 @@ app.MapPost("/api/calls/manual", async (
         var mediaHandler = new AcsMediaStreamingHandler(roomConnector, logger);
         session.MediaHandler = mediaHandler;
 
-        var openAIService = new AzureOpenAIService(mediaHandler, app.Configuration);
-        openAIService.OnTranscript = (speaker, text) => session.AddTranscript(speaker, text);
-        session.AiService = openAIService;
+        if (!request.DisableOpenAI)
+        {
+            var openAIService = new AzureOpenAIService(mediaHandler, app.Configuration);
+            openAIService.OnTranscript = (speaker, text) => session.AddTranscript(speaker, text);
+            session.AiService = openAIService;
 
-        mediaHandler.aiServiceHandler = openAIService;
-        roomConnector.aiServiceHandler = openAIService;
+            mediaHandler.aiServiceHandler = openAIService;
+            roomConnector.aiServiceHandler = openAIService;
+        }
+        else
+        {
+            logger.LogInformation("OpenAI disabled for manual call {Id}", correlationId);
+        }
     }
     catch (Exception ex)
     {
@@ -369,11 +376,15 @@ app.MapPost("/api/calls/manual", async (
     session.ResourceId = roomConnector.ResourceId;
     logger.LogInformation("MediaSDK connected for manual call {Id}", correlationId);
 
-    session.AiService.StartConversation();
-    session.Status = CallStatus.Active;
-    logger.LogInformation("AI service started for manual call {Id}", correlationId);
+    if (session.AiService != null)
+    {
+        session.AiService.StartConversation();
+        logger.LogInformation("AI service started for manual call {Id}", correlationId);
+    }
 
-    return Results.Ok(new { correlationId, message = "Manual call started", mediaSessionId });
+    session.Status = CallStatus.Active;
+
+    return Results.Ok(new { correlationId, message = request.DisableOpenAI ? "Manual call started (OpenAI disabled)" : "Manual call started", mediaSessionId });
 });
 
 app.MapPost("/api/incomingCall", async (

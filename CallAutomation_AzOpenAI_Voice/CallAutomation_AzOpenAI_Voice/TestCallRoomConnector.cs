@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Azure.Communication.Media;
 using CallAutomationOpenAI;
@@ -27,7 +28,7 @@ public class TestCallRoomConnector
     private MediaSession? _session;
     public string? LastError { get; private set; }
     public string? EndpointId => _connection?.EndpointId;
-    public string? ResourceId => _connection?.ResourceId;
+    public string? ResourceId => "_connection?.ResourceId";
     public string? MediaConnectionState => _connection?.ConnectionState.ToString();
     public string? ServiceOrigin { get; private set; }
     public long MediaPacketsSent => _mediaPacketsSent;
@@ -44,6 +45,8 @@ public class TestCallRoomConnector
     public int RemoteDataStreamCount => _remoteStreams.Values.Count(s => s.StreamType == "Data");
     public OutgoingAudioStream OutgoingAudioStream { get; private set; }
     public AzureOpenAIService aiServiceHandler { get; set; }
+    private Channel<byte[]>? _audioForwardChannel;
+    private Task? _audioForwardTask;
 
     public TestCallRoomConnector(MediaClient mediaClient, ILogger logger, IServiceProvider serviceProvider)
     {
@@ -56,24 +59,31 @@ public class TestCallRoomConnector
     {
         try
         {
+            // Initialize bounded channel for audio forwarding (avoids thread pool saturation)
+            _audioForwardChannel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(200)
+            {
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleReader = true,
+                SingleWriter = false
+            });
+            _audioForwardTask = Task.Run(ProcessAudioForwardChannelAsync);
+
             ServiceOrigin = _mediaClient.ServiceOrigin;
             _logger.LogInformation("Service Origin URL: {ServiceOrigin}", ServiceOrigin);
 
-            _connection = await _mediaClient.CreateMediaConnectionAsync(new MediaConnectionOptions());
+            _connection = await _mediaClient.CreateMediaConnectionAsync();
 
             _logger.LogInformation("MediaConnection {State} {EndpointId}", _connection.ConnectionState, _connection.EndpointId);
 
             _connection.OnStateChanged += OnConnectionStateChanged;
             _connection.OnStatsReportReceived += OnStatsReportReceived;
 
-            _session = _connection.CreateMediaSession(
+            var _session = await _connection.JoinAsync(
                 sessionId: sessionId,
-                options: new MediaSessionOptions(new HashSet<uint>()));
+                mediaSessionJoinOptions: new MediaSessionJoinOptions() { IncomingDataPayloadTypes = [5] });
 
             _session.OnIncomingAudioStreamAdded += OnIncomingAudioStreamAdded;
             _session.OnIncomingAudioStreamRemoved += OnIncomingAudioStreamRemoved;
-
-            await _session.JoinAsync();
 
             OutgoingAudioStream = _session.AddOutgoingAudioStream();
 
@@ -94,6 +104,8 @@ public class TestCallRoomConnector
     public void Disconnect()
     {
         _connected = false;
+        _audioForwardChannel?.Writer.TryComplete();
+        try { _audioForwardTask?.Wait(TimeSpan.FromSeconds(2)); } catch { }
         try { _session?.Dispose(); } catch { }
         try { _connection?.Dispose(); } catch { }
         _session = null;
@@ -105,6 +117,12 @@ public class TestCallRoomConnector
     private void OnConnectionStateChanged(object? sender, ConnectionStateChangedEventArgs e)
     {
         _logger.LogInformation("ConnectionStateChanged: {State}", e.ConnectionState);
+
+        // Log thread pool health on state changes to diagnose saturation
+        ThreadPool.GetAvailableThreads(out int workerThreads, out int completionPortThreads);
+        ThreadPool.GetMaxThreads(out int maxWorkerThreads, out int maxCompletionPortThreads);
+        _logger.LogInformation("ThreadPool: Workers={Available}/{Max}, IO={IOAvailable}/{IOMax}",
+            workerThreads, maxWorkerThreads, completionPortThreads, maxCompletionPortThreads);
     }
 
     private void OnIncomingAudioStreamAdded(object? sender, IncomingAudioStreamAddedEventArgs e)
@@ -121,9 +139,6 @@ public class TestCallRoomConnector
         };
 
         stream.OnIncomingAudioStreamReceived += OnIncomingAudioStreamReceived;
-#pragma warning disable ACS_MEDIA_SDK_STREAM_STATE_API
-        stream.StateReceived += (s, stateArgs) => OnStreamStateReceived(stream.Id, stream.EndpointId, stateArgs);
-#pragma warning restore ACS_MEDIA_SDK_STREAM_STATE_API
     }
 
     private void OnIncomingAudioStreamReceived(object? sender, IncomingAudioStreamReceivedEventArgs args)
@@ -133,7 +148,10 @@ public class TestCallRoomConnector
         if (count <= 10 || count % 100 == 1)
             _logger.LogInformation("MediaPacketsReceived: {Count}, DataLen: {DataLen}, ComfortNoise: {ComfortNoise}", count, dataLen, args.ComfortNoise);
 
-        if (!_connected || aiServiceHandler == null)
+        if (dataLen == 0)
+            return;
+
+        if (!_connected || aiServiceHandler == null || _audioForwardChannel == null)
         {
             if (count <= 5)
                 _logger.LogWarning("Cannot forward audio to OpenAI: connected={Connected}, aiHandler={HasHandler}", _connected, aiServiceHandler != null);
@@ -141,34 +159,39 @@ public class TestCallRoomConnector
         }
 
         var audioData = args.Data.ReadDataAsSpan().ToArray();
-        _ = Task.Run(async () =>
+        if (!_audioForwardChannel.Writer.TryWrite(audioData))
         {
-            try
-            {
-                await aiServiceHandler.SendAudioToExternalAI(new MemoryStream(audioData));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error sending audio to OpenAI");
-            }
-        });
+            // Channel full — drop oldest packets to avoid back-pressure buildup
+            if (count % 500 == 0)
+                _logger.LogWarning("Audio forward channel full, dropping packet {Count}", count);
+        }
     }
 
-    private void OnStreamStateReceived(long streamId, string? endpointId,
-#pragma warning disable ACS_MEDIA_SDK_STREAM_STATE_API
-        IncomingStreamStateEventArgs e)
-#pragma warning restore ACS_MEDIA_SDK_STREAM_STATE_API
+    private async Task ProcessAudioForwardChannelAsync()
     {
-        var stateHex = BitConverter.ToString(e.State).Replace("-", "");
-        _logger.LogInformation("StreamStateReceived - StreamId({StreamId}) Endpoint({EndpointId}) State({StateHex})", streamId, endpointId, stateHex);
-
-        _streamStateLog.Enqueue($"[{DateTime.UtcNow:HH:mm:ss}] Stream {streamId} ({endpointId}): {stateHex}");
-        while (_streamStateLog.Count > 50) _streamStateLog.TryDequeue(out _);
-
-        if (_remoteStreams.TryGetValue(streamId, out var info))
+        try
         {
-            info.LastState = stateHex;
-            info.LastStateAt = DateTime.UtcNow;
+            await foreach (var audioData in _audioForwardChannel!.Reader.ReadAllAsync())
+            {
+                var handler = aiServiceHandler;
+                if (!_connected || handler == null)
+                    continue;
+
+                try
+                {
+                    await handler.SendAudioToExternalAI(new MemoryStream(audioData));
+                }
+                catch (Exception ex)
+                {
+                    if (_connected)
+                        _logger.LogError(ex, "Error sending audio to OpenAI");
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Audio forward channel processing error");
         }
     }
 
