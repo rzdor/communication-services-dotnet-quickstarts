@@ -1,28 +1,32 @@
-﻿using System.Net.WebSockets;
-using System.Threading.Channels;
-using OpenAI.RealtimeConversation;
+﻿using System.ClientModel;
+using System.Text;
 using Azure.AI.OpenAI;
-using System.ClientModel;
 using Azure.Communication.CallAutomation;
+using OpenAI.RealtimeConversation;
 
 #pragma warning disable OPENAI002
 namespace CallAutomationOpenAI
 {
-    public class AzureOpenAIService
+    public class AzureOpenAIService : IDisposable
     {
-        private WebSocket m_webSocket;
         private CancellationTokenSource m_cts;
         private RealtimeConversationSession m_aiSession;
         private AcsMediaStreamingHandler m_mediaStreaming;
-        private MemoryStream m_memoryStream;
-        private string m_answerPromptSystemTemplate = "You are an AI assistant that helps people find information.";
+        private bool _disposed;
+        private string m_answerPromptSystemTemplate = @"Your name is Sidney. You are a helpful AI voice assistant.";
+
+        // Callback for transcript events (speaker, text)
+        public Action<string, string>? OnTranscript { get; set; }
+        public long OpenAIPacketsSent => _openAIPacketsSent;
+        public long OpenAIPacketsReceived => _openAIPacketsReceived;
+        private long _openAIPacketsSent;
+        private long _openAIPacketsReceived;
 
         public AzureOpenAIService(AcsMediaStreamingHandler mediaStreaming, IConfiguration configuration)
         {            
             m_mediaStreaming = mediaStreaming;
             m_cts = new CancellationTokenSource();
             m_aiSession =  CreateAISessionAsync(configuration).GetAwaiter().GetResult();
-            m_memoryStream = new MemoryStream();
         }
 
         private async Task<RealtimeConversationSession> CreateAISessionAsync(IConfiguration configuration)
@@ -35,7 +39,7 @@ namespace CallAutomationOpenAI
 
             var openAiModelName = configuration.GetValue<string>("AzureOpenAIDeploymentModelName");
             ArgumentNullException.ThrowIfNullOrEmpty(openAiModelName);
-            var systemPrompt = configuration.GetValue<string>("SystemPrompt") ?? m_answerPromptSystemTemplate;
+            var systemPrompt = m_answerPromptSystemTemplate;
             ArgumentNullException.ThrowIfNullOrEmpty(openAiUri);
 
             var aiClient = new AzureOpenAIClient(new Uri(openAiUri), new ApiKeyCredential(openAiKey));
@@ -54,7 +58,7 @@ namespace CallAutomationOpenAI
                 {
                     Model = "whisper-1",
                 },
-                TurnDetectionOptions = ConversationTurnDetectionOptions.CreateServerVoiceActivityTurnDetectionOptions(0.5f, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500)),
+                TurnDetectionOptions = ConversationTurnDetectionOptions.CreateServerVoiceActivityTurnDetectionOptions(0.6f, TimeSpan.FromMilliseconds(2000), TimeSpan.FromMilliseconds(800)),
             };
 
             await session.ConfigureSessionAsync(sessionOptions);
@@ -79,9 +83,10 @@ namespace CallAutomationOpenAI
                     {
                         Console.WriteLine(
                             $"  -- Voice activity detection started at {speechStartedUpdate.AudioStartTime} ms");
-                        // Barge-in, send stop audio
-                        var jsonString = OutStreamingData.GetStopAudioForOutbound();
-                        await m_mediaStreaming.SendMessageAsync(jsonString);
+                        // Barge-in: clear any queued outgoing audio.
+                        // Note: OutStreamingData.GetStopAudioForOutbound() is for WebSocket-based
+                        // Call Automation streaming, not MediaSDK OutgoingAudioStream.
+                        // Writing JSON into a PCM audio stream corrupts the transport.
                     }
 
                     if (update is ConversationInputSpeechFinishedUpdate speechFinishedUpdate)
@@ -95,11 +100,11 @@ namespace CallAutomationOpenAI
                         Console.WriteLine($"  -- Begin streaming of new item");
                     }
 
-                    // Audio transcript  updates contain the incremental text matching the generated
-                    // output audio.
+                    // Audio transcript updates contain the incremental text matching the generated output audio.
                     if (update is ConversationItemStreamingAudioTranscriptionFinishedUpdate outputTranscriptDeltaUpdate)
                     {
                         Console.Write(outputTranscriptDeltaUpdate.Transcript);
+                        OnTranscript?.Invoke("AI", outputTranscriptDeltaUpdate.Transcript);
                     }
 
                     // Audio delta updates contain the incremental binary audio data of the generated output
@@ -108,8 +113,8 @@ namespace CallAutomationOpenAI
                     {
                         if( deltaUpdate.AudioBytes != null)
                         {
-                            var jsonString = OutStreamingData.GetAudioDataForOutbound(deltaUpdate.AudioBytes.ToArray());
-                            await m_mediaStreaming.SendMessageAsync(jsonString);
+                            Interlocked.Increment(ref _openAIPacketsReceived);
+                            await m_mediaStreaming.SendMessageAsync(deltaUpdate.AudioBytes.ToArray());
                         }
                     }
 
@@ -124,6 +129,7 @@ namespace CallAutomationOpenAI
                         Console.WriteLine();
                         Console.WriteLine($"  -- User audio transcript: {transcriptionCompletedUpdate.Transcript}");
                         Console.WriteLine();
+                        OnTranscript?.Invoke("User", transcriptionCompletedUpdate.Transcript);
                     }
 
                     if (update is ConversationResponseFinishedUpdate turnFinishedUpdate)
@@ -154,16 +160,24 @@ namespace CallAutomationOpenAI
             _ = Task.Run(async () => await GetOpenAiStreamResponseAsync());
         }
 
-        public async Task SendAudioToExternalAI(MemoryStream memoryStream)
+        public async Task SendAudioToExternalAI(Stream memoryStream)
         {
+            Interlocked.Increment(ref _openAIPacketsSent);
             await m_aiSession.SendInputAudioAsync(memoryStream);
         }
 
         public void Close()
         {
+            if (_disposed) return;
             m_cts.Cancel();
             m_cts.Dispose();
             m_aiSession.Dispose();
+            _disposed = true;
+        }
+
+        public void Dispose()
+        {
+            Close();
         }
     }
 }

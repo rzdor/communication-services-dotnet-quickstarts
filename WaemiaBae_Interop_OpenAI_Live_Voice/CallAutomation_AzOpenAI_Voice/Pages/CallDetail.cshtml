@@ -157,6 +157,15 @@ else
             }
         </div>
     </div>
+
+    <div class="card" style="margin-top: 16px;">
+        <h2>Data Channel Messages <span id="data-msg-count" style="font-size: 12px; color: var(--text-secondary);"></span></h2>
+        <div id="data-messages" style="max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 12px;">
+            <div class="empty-state" id="empty-data-messages">
+                <p>No data channel messages yet...</p>
+            </div>
+        </div>
+    </div>
 }
 
 @section Scripts {
@@ -211,6 +220,52 @@ else
             btn.textContent = '📞 Hang Up';
         }
     }
+
+    // Data channel messages polling
+    var _dataMessagesSince = 0;
+    async function pollDataMessages() {
+        try {
+            const resp = await fetch('/api/calls/' + callId + '/data-messages?since=' + _dataMessagesSince);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data.messages && data.messages.length > 0) {
+                var container = document.getElementById('data-messages');
+                var empty = document.getElementById('empty-data-messages');
+                if (empty) empty.remove();
+
+                data.messages.forEach(function(msg) {
+                    var timestamp = msg.timestamp ?? msg.Timestamp ?? '';
+                    var streamId = msg.streamId ?? msg.StreamId ?? '';
+                    var payloadType = msg.payloadType ?? msg.PayloadType ?? '';
+                    var dataLength = msg.dataLength ?? msg.DataLength ?? 0;
+                    var contentText = msg.content ?? msg.Content ?? '';
+
+                    var div = document.createElement('div');
+                    div.style.cssText = 'padding: 6px 8px; margin-bottom: 4px; background: var(--bg-primary); border-radius: 4px; border-left: 3px solid #0078d4;';
+                    var header = '<span style="color: var(--text-secondary); font-size: 11px;">'
+                        + timestamp + ' | Stream ' + streamId
+                        + ' | Type ' + payloadType
+                        + ' | ' + dataLength + ' bytes</span>';
+                    var content = '<div style="margin-top: 4px; white-space: pre-wrap; word-break: break-all;">'
+                        + escapeHtml(contentText) + '</div>';
+                    div.innerHTML = header + content;
+                    container.appendChild(div);
+                });
+                container.scrollTop = container.scrollHeight;
+                _dataMessagesSince = data.total;
+            }
+            document.getElementById('data-msg-count').textContent = '(' + (data.total || 0) + ')';
+        } catch (e) { }
+    }
+
+    function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    setInterval(pollDataMessages, 2000);
+    pollDataMessages();
 </script>
 }
 }

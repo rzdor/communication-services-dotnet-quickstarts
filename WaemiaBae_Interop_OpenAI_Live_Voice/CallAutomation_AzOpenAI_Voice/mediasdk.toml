@@ -15,7 +15,7 @@
 [general]
 debug_mode = true
 feed_topic_name = "conversation"
-#app_entity_id = "AAAAAAAAAAAAAAAAAAACyQ=="
+app_entity_id = "AAAAAAAAAAAAAAAAAAACyQ=="
 
 # Enable Europe compliance mode
 # europe_compliant = false
@@ -28,7 +28,7 @@ feed_topic_name = "conversation"
 
 # Telemetry and Monitoring
 [telemetry]
-# enabled = true
+enabled = true
 
 # Stats report interval in seconds (default: 10)
 # stats_report_interval_secs = 10

@@ -57,10 +57,19 @@ else {
     Write-Warning "  Native binaries directory not found at $nativeDir"
 }
 
-# Verify mediasdk.toml
-$tomlPath = Join-Path $nativeDir "mediasdk.toml"
-if (Test-Path $tomlPath) {
-    Write-Host "  mediasdk.toml: present" -ForegroundColor Green
+# Verify mediasdk.toml in both root and native runtime folder
+$tomlRootPath = Join-Path $publishDir "mediasdk.toml"
+$tomlNativePath = Join-Path $nativeDir "mediasdk.toml"
+
+if (Test-Path $tomlRootPath) {
+    Write-Host "  mediasdk.toml (root): present" -ForegroundColor Green
+}
+else {
+    Write-Warning "  mediasdk.toml not found in publish root"
+}
+
+if (Test-Path $tomlNativePath) {
+    Write-Host "  mediasdk.toml (native): present" -ForegroundColor Green
 }
 else {
     Write-Warning "  mediasdk.toml not found in native directory"
